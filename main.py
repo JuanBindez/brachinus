@@ -1,20 +1,27 @@
-from cryptophoto import AES
+from cryptophoto import AESFileCrypt
 
-# Create instance (automatically generates key)
-crypt = AES()
+PASSWORD = "senhashjsdhs12245"
 
-# Encrypt image
-crypt.encrypt('photo.jpg', 'photo_encrypted.bin')
 
-# Decrypt image
-crypt.decrypt('photo_encrypted.bin', 'photo_decrypted.jpg')
+"""
+# Usando com senha
+crypt = AESFileCrypt.create_with_password(PASSWORD)
+crypt.encrypt("foto.jpg", "foto_criptografada.bin")
 
-# Save key for future use
-crypt.save_key('my_key.bin')
+"""
 
-# Load with existing key
-crypt2 = AES.load_from_keyfile('my_key.bin')
-crypt2.decrypt('photo_encrypted.bin', 'another_copy.jpg')
 
-# Create with new random key
-crypt3 = AES.create_with_new_key()
+
+# Para descriptografar depois com a mesma senha
+crypt2 = AESFileCrypt.create_with_password(PASSWORD)
+crypt2.decrypt("foto_criptografada.bin", "foto_descriptografada.jpg")
+
+
+
+"""
+# Usando com chave binária (modo original)
+crypt3 = AESFileCrypt()  # Gera chave aleatória
+crypt3.encrypt("documento.pdf", "doc_criptografado.bin")
+
+# Carregando chave de arquivo
+crypt4 = AESFileCrypt.load_from_keyfile("minha_chave.bin")"""
