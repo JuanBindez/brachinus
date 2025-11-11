@@ -1,6 +1,6 @@
 # brachinus
 
-AES-256 CBC file encryption library with support for individual files and directory batch operations.
+## AES-256 CBC file encryption library with support for individual files and directory batch operations.
 
 A simple and powerful AES-256 encryption library for Python, supporting:
 
