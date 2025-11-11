@@ -4,7 +4,21 @@ from Crypto.Random import get_random_bytes
 from Crypto.Protocol.KDF import PBKDF2
 import os
 
+
 class AES256:
+    """
+    AES-256 encryption/decryption handler supporting both random keys and
+    password-derived keys using PBKDF2.
+
+    Args:
+        key (bytes, optional): 32-byte AES key. Must be exactly 32 bytes.
+        password (str, optional): Password for deriving the key using PBKDF2.
+        salt (bytes, optional): Optional salt for PBKDF2. If omitted, a random
+            16-byte salt will be generated.
+
+    Raises:
+        ValueError: If key length is invalid.
+    """
     def __init__(self, key=None, password=None, salt=None):
         if password is not None:
             # Store password for later use in decryption
@@ -28,6 +42,25 @@ class AES256:
             raise ValueError("Key must be 32 bytes for AES-256")
     
     def encrypt_file(self, input_path, output_path=None):
+        """
+        Encrypts a single file using AES-256 CBC mode.
+
+        Args:
+            input_path (str): Path to the file to encrypt.
+            output_path (str, optional): Output encrypted file path. If None,
+                appends '.enc' to the original filename.
+
+        Returns:
+            dict: Metadata about the encryption, including:
+                - iv (bytes): Initialization vector used.
+                - salt (bytes or None): Salt used (if password-based).
+                - input_file (str): Original file path.
+                - output_file (str): Encrypted file path.
+
+        Raises:
+            FileNotFoundError: If the input file does not exist.
+        """
+
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"File not found: {input_path}")
         
@@ -61,6 +94,23 @@ class AES256:
         }
     
     def decrypt_file(self, input_path, output_path=None):
+        """
+        Decrypts a previously encrypted file using AES-256 CBC mode.
+
+        Args:
+            input_path (str): Path to encrypted file.
+            output_path (str, optional): Output decrypted file path. If None:
+                - removes '.enc' if present
+                - otherwise adds '.dec'
+
+        Returns:
+            str: Path to decrypted file.
+
+        Raises:
+            FileNotFoundError: If the encrypted file does not exist.
+            ValueError: If padding or decryption fails.
+        """
+
         if not os.path.exists(input_path):
             raise FileNotFoundError(f"File not found: {input_path}")
         
@@ -114,15 +164,20 @@ class AES256:
     def encrypt_directory(self, directory_path, output_dir=None, extensions=None):
         """
         Encrypts all files in a directory.
-        
+
         Args:
-            directory_path (str): Path to directory
-            output_dir (str, optional): Output directory
-            extensions (list, optional): File extensions to encrypt (e.g., ['.jpg', '.mp4'])
-        
+            directory_path (str): Path to the directory containing files.
+            output_dir (str, optional): Output directory for encrypted files.
+            extensions (list[str], optional): List of allowed extensions to encrypt.
+                If None, encrypts all files.
+
         Returns:
-            list: List of encrypted file paths
+            list[str]: List of encrypted file paths.
+
+        Raises:
+            FileNotFoundError: If directory does not exist.
         """
+
         if not os.path.exists(directory_path):
             raise FileNotFoundError(f"Directory not found: {directory_path}")
         
@@ -151,15 +206,19 @@ class AES256:
     
     def decrypt_directory(self, directory_path, output_dir=None):
         """
-        Decrypts all files in a directory.
-        
+        Decrypts all encrypted files (.enc) in a directory.
+
         Args:
-            directory_path (str): Path to directory with encrypted files
-            output_dir (str, optional): Output directory
-        
+            directory_path (str): Directory containing encrypted files.
+            output_dir (str, optional): Directory to save decrypted files.
+
         Returns:
-            list: List of decrypted file paths
+            list[str]: List of decrypted file paths.
+
+        Raises:
+            FileNotFoundError: If directory does not exist.
         """
+
         if not os.path.exists(directory_path):
             raise FileNotFoundError(f"Directory not found: {directory_path}")
         
@@ -183,11 +242,17 @@ class AES256:
     
     def get_key_info(self):
         """
-        Returns key information.
-        
+        Returns information about the current AES key and salt.
+
         Returns:
-            dict: Key information
+            dict: Contains:
+                - key (bytes)
+                - key_hex (str)
+                - salt (bytes or None)
+                - salt_hex (str or None)
+                - key_type (str): 'password-derived' or 'random-binary'
         """
+
         return {
             'key': self.key,
             'key_hex': self.key.hex(),
@@ -198,11 +263,18 @@ class AES256:
     
     def save_key(self, key_path):
         """
-        Saves the key to a file (only for binary keys, not password-based).
-        
+        Saves the binary key to a file.
+
+        Note:
+            This is only valid when using binary keys (not password-derived keys).
+
         Args:
-            key_path (str): Path to save the key
+            key_path (str): File path to save the key.
+
+        Raises:
+            ValueError: If key is derived from a password.
         """
+
         if self.salt is not None:
             raise ValueError("Cannot save password-derived key. Save the password and salt instead.")
         
@@ -212,14 +284,15 @@ class AES256:
     @classmethod
     def load_from_keyfile(cls, key_path):
         """
-        Creates instance by loading key from file.
-        
+        Creates an AES256 instance by loading a 32-byte key from a file.
+
         Args:
-            key_path (str): Path to the key file
-        
+            key_path (str): Path to binary key file.
+
         Returns:
-            AESFileCrypt: Instance with loaded key
+            AES256: Instance initialized with the loaded key.
         """
+        
         with open(key_path, 'rb') as f:
             key = f.read()
         return cls(key=key)

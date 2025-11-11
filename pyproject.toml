@@ -3,49 +3,47 @@ requires = ["setuptools>=67.4.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cryptophoto"
-version = "0.0.1"
+name = "brachinus"
+version = "1.0-rc1"
 authors = [
   { name="Juan Bindez", email="juanbindez780@gmail.com" },
 ]
-description = "Python3 library for encrypting images, using the AES-256-CBC algorithm with IV. "
+description = "AES-256 CBC file encryption library with support for individual files and directory batch operations."
 readme = "README.md"
 requires-python = ">=3.7"
-license = {text = "MIT license"}
-keywords = ["youtube", "download", "video", "stream",]
+license = {text = "GPLv2 license"}
+keywords = ["encryption", "crypto", "aes", "security", "files", "cryptography", "aes-256", "file-protection", "data-security",]
 classifiers = [
 	"Development Status :: 5 - Production/Stable",
 	"Environment :: Console",
 	"Intended Audience :: Developers",
-	"License :: OSI Approved :: MIT License",
+	"License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
 	"Natural Language :: English",
 	"Operating System :: OS Independent",
-	"Programming Language :: Python :: 3.7",
 	"Programming Language :: Python :: 3.8",
 	"Programming Language :: Python :: 3.9",
 	"Programming Language :: Python :: 3.10",
 	"Programming Language :: Python :: 3.11",
 	"Programming Language :: Python :: 3.12",
 	"Programming Language :: Python",
-	"Topic :: Internet",
-	"Topic :: Multimedia :: Video",
+	"Topic :: Security :: Cryptography",
 	"Topic :: Software Development :: Libraries :: Python Modules",
 	"Topic :: Terminals",
+	"Topic :: System :: Filesystems",
 	"Topic :: Utilities",
 ]
-dependencies = ["pycryptodome"]
+dependencies = ['pycryptodome']
 
 [project.urls]
-"Homepage" = "https://github.com/juanbindez/cryptophoto"
-"Bug Reports" = "https://github.com/juanbindez/cryptophoto/issues"
-"Read the Docs" = "http://cryptophoto.readthedocs.io/"
+"Homepage" = "https://github.com/juanbindez/brachinus"
+"Bug Reports" = "https://github.com/juanbindez/brachinus/issues"
+"Read the Docs" = "http://brachinus.readthedocs.io/"
 
 [project.scripts]
-cryptophoto = "cryptophoto.cli:main"
+brachinus = "brachinus.cli:main"
 
 [tool.setuptools.packages.find]
-include = ["cryptophoto*"]
+include = ["brachinus*"]
 
 [tool.setuptools]
 license-files = ["LICENSE"]
-include-package-data = true
