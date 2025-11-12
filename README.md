@@ -2,50 +2,55 @@
 
 ## AES-256 CBC file encryption library with support for individual files and directory batch operations.
 
-A simple and powerful AES-256 encryption library for Python, supporting:
+### Supports single-file and directory batch operations + command-line usage
 
-✅ Password-based key derivation (PBKDF2)  
-✅ Random binary keys  
-✅ File encryption/decryption  
-✅ Directory encryption/decryption  
-✅ Key saving/loading  
-✅ Automatic handling of salts and IVs  
-✅ Minimal and easy-to-use interface  
+Brachinus is a simple, secure, and feature-rich AES-256 encryption library for Python.  
+It supports password-based key derivation, random binary keys, file/directory encryption, and includes a built-in CLI interface.
 
 ---
 
-## Features
+##  Features
 
-- AES-256 encryption using CBC mode
-- Secure key derivation using PBKDF2 (100k iterations)
+- AES-256 encryption (CBC mode)
+- PBKDF2 key derivation (100k iterations)
 - Automatic IV generation
-- Optional extension filtering when encrypting directories
-- Metadata handling (salt + IV stored in encrypted file)
-- Utility functions for one-line encryption/decryption
+- Salt + IV metadata stored in output file
+- File and directory encryption/decryption
+- Optional extension filtering
+- Key saving/loading utilities
+- Built-in command-line interface (CLI)
 
 ---
 
 ## Installation
 
-You need **pycryptodome**:
+Install:
 
 ```sh
-pip install pycryptodome
+pip install brachinus
+```
+
+Or install from source:
+
+```sh
+git clone https://github.com/JuanBindez/brachinus
+cd brachinus
+pip install .
 ```
 
 ---
 
-## Basic Usage
+# Usage (Python API)
 
-### Encrypt a file with a password
+## Encrypt a file with a password
 
 ```python
 from brachinus import encrypt_file_with_password
 
-encrypt_file_with_password("example.txt", "mysecretpassword")
+encrypt_file_with_password("example.txt", "mypassword")
 ```
 
-This generates a file:
+Creates:
 
 ```
 example.txt.enc
@@ -53,19 +58,19 @@ example.txt.enc
 
 ---
 
-### Decrypt a file with a password
+## Decrypt a file
 
 ```python
 from brachinus import decrypt_file_with_password
 
-decrypt_file_with_password("example.txt.enc", "mysecretpassword")
+decrypt_file_with_password("example.txt.enc", "mypassword")
 ```
 
 ---
 
-## Using AES256 Class Directly
+## Using the AES256 Class Directly
 
-### Create an instance with a password
+### With a password
 
 ```python
 from brachinus import AES256
@@ -75,52 +80,37 @@ aes.encrypt_file("data.pdf")
 aes.decrypt_file("data.pdf.enc")
 ```
 
----
-
-### Using a binary key instead of a password
+### With a random binary key
 
 ```python
-aes = AES256()  # generates a random 32-byte key
+aes = AES256()  # generates a new random key
 print(aes.key)
 ```
 
----
-
-### Save and load a binary key
-
-#### Save the key
+### Key save/load
 
 ```python
-aes = AES256()
 aes.save_key("aes.key")
-```
-
-#### Load the key
-
-```python
 loaded = AES256.load_from_keyfile("aes.key")
 ```
 
 ---
 
-## Directory Encryption
+# Directory Encryption
 
-### Encrypt all files in a directory
+### Encrypt all files
 
 ```python
-aes = AES256(password="mypassword")
 aes.encrypt_directory("myfolder")
 ```
 
-Creates a folder:
+Produces:
 
 ```
 myfolder_encrypted/
 ```
 
----
-
-### Encrypt only specific file types
+### Encrypt only specific extensions
 
 ```python
 aes.encrypt_directory("photos", extensions=[".jpg", ".png"])
@@ -128,7 +118,7 @@ aes.encrypt_directory("photos", extensions=[".jpg", ".png"])
 
 ---
 
-## Directory Decryption
+# Directory Decryption
 
 ```python
 aes.decrypt_directory("myfolder_encrypted")
@@ -142,16 +132,14 @@ myfolder_encrypted_decrypted/
 
 ---
 
-## Key Information
-
-You can read key metadata:
+# Key Information
 
 ```python
 info = aes.get_key_info()
 print(info)
 ```
 
-Example output:
+Example:
 
 ```json
 {
@@ -165,26 +153,75 @@ Example output:
 
 ---
 
-## Encrypted File Structure
-
-The encrypted file is stored as:
+# Internal Encrypted File Format
 
 ```
-[SALT_LENGTH (4 bytes)] [SALT (optional)] [IV (16 bytes)] [ENCRYPTED_DATA]
+[4 bytes salt_length] [salt (if present)] [16-byte IV] [encrypted_data]
 ```
 
-Notes:
-
-- Salt is stored only for password-based encryption
-- IV is always stored
-- Ensures correct decryption even if the program restarts or key is regenerated
+- Salt only stored for password-derived keys
+- IV always present
+- Ensures reproducible decryption
 
 ---
 
-## Security Notes
+# Command Line Interface (CLI)
 
-⚠️ **Never reuse the same password + salt combination manually.**  
-⚠️ Keep your password and salt safe.  
-⚠️ For maximum security, use long passwords with high entropy.
+Brachinus includes a terminal command: **`brachinus`**
+
+After installation you can run:
+
+```sh
+brachinus --help
+```
+
+---
+
+## CLI Commands
+
+### Encrypt a file
+
+```sh
+brachinus encrypt-file input.txt
+```
+
+### Encrypt a file with password
+
+```sh
+brachinus encrypt-file input.txt --password "mypassword"
+```
+
+### Decrypt a file
+
+```sh
+brachinus decrypt-file input.txt.enc --password "mypassword"
+```
+
+### Encrypt a directory
+
+```sh
+brachinus encrypt-dir myfolder --password "mypassword"
+```
+
+### Decrypt a directory
+
+```sh
+brachinus decrypt-dir myfolder_encrypted --password "mypassword"
+```
+
+### Use a keyfile instead of password
+
+```sh
+brachinus encrypt-file document.pdf --keyfile aes.key
+```
+
+---
+
+# Security Notes
+
+⚠️ Use strong passwords  
+⚠️ Never reuse password + salt manually  
+⚠️ Keep `.key` files secure  
+⚠️ Lost passwords or keys cannot be recovered  
 
 ---

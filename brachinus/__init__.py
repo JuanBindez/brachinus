@@ -6,3 +6,4 @@ __js_url__ = None
 
 from brachinus.version import __version__
 from brachinus.__main__ import AES256
+from brachinus.__main__ import encrypt_file_with_password, decrypt_file_with_password
