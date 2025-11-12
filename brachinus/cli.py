@@ -13,10 +13,10 @@ def main():
 
     # Operações principais (mutuamente exclusivas)
     operation_group = parser.add_mutually_exclusive_group(required=True)
-    operation_group.add_argument("-ef", "--encfile", help="Encrypt a file", metavar="FILE")
-    operation_group.add_argument("-df", "--decfile", help="Decrypt a file", metavar="FILE") 
-    operation_group.add_argument("-ed", "--encdir", help="Encrypt all files in a directory", metavar="DIR")
-    operation_group.add_argument("-dd", "--decdir", help="Decrypt all .enc files in a directory", metavar="DIR")
+    operation_group.add_argument("-ef", "--encryptfile", help="Encrypt a file", metavar="FILE")
+    operation_group.add_argument("-df", "--decryptfile", help="Decrypt a file", metavar="FILE") 
+    operation_group.add_argument("-ed", "--encryptdir", help="Encrypt all files in a directory", metavar="DIR")
+    operation_group.add_argument("-dd", "--decryptdir", help="Decrypt all .enc files in a directory", metavar="DIR")
     operation_group.add_argument("-ki", "--keyinfo", action="store_true", help="Display key information")
     operation_group.add_argument("-sk", "--savekey", help="Save binary AES key to a file", metavar="KEYFILE")
     operation_group.add_argument("-lk", "--loadkey", help="Load key and print info", metavar="KEYFILE")
@@ -32,10 +32,10 @@ def main():
     # Handle operations
     # --------------------------------------------------
 
-    if args.encfile:
+    if args.encryptfile:
         password = getpass.getpass("Enter password: ")
         aes = AES256(password=password)
-        result = aes.encrypt_file(args.encfile, args.output)
+        result = aes.encrypt_file(args.encryptfile, args.output)
         print("[+] File encrypted!")
         if args.verbose:
             print("Input:", result["input_file"])
@@ -45,29 +45,29 @@ def main():
         else:
             print("Output:", result["output_file"])
 
-    elif args.decfile:
+    elif args.decryptfile:
         password = getpass.getpass("Enter password: ")
         aes = AES256(password=password)
-        output = aes.decrypt_file(args.decfile, args.output)
+        output = aes.decrypt_file(args.decryptfile, args.output)
         print("[+] File decrypted!")
         print("Output:", output)
 
-    elif args.encdir:
+    elif args.encryptdir:
         password = getpass.getpass("Enter password: ")
         aes = AES256(password=password)
-        output_dir = args.output or args.encdir + "_encrypted"
-        files = aes.encrypt_directory(args.encdir, output_dir)
+        output_dir = args.output or args.encryptdir + "_encrypted"
+        files = aes.encrypt_directory(args.encryptdir, output_dir)
         print("[+] Directory encrypted!")
         print("Files processed:", len(files))
         if args.verbose:
             for f in files:
                 print(" -", f)
 
-    elif args.decdir:
+    elif args.decryptdir:
         password = getpass.getpass("Enter password: ")
         aes = AES256(password=password)
-        output_dir = args.output or args.decdir + "_decrypted"
-        files = aes.decrypt_directory(args.decdir, output_dir)
+        output_dir = args.output or args.decryptdir + "_decrypted"
+        files = aes.decrypt_directory(args.decryptdir, output_dir)
         print("[+] Directory decrypted!")
         print("Files processed:", len(files))
         if args.verbose:
