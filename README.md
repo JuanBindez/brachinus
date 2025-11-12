@@ -1,5 +1,10 @@
 # brachinus
 
+[![PyPI - Downloads](https://img.shields.io/pypi/dm/brachinus)](https://pypi.org/project/brachinus/)
+![PyPI - License](https://img.shields.io/pypi/l/brachinus)
+[![GitHub Tag](https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases)](https://github.com/JuanBindez/brachinus/releases)
+[![PyPI - Version](https://img.shields.io/pypi/v/brachinus)](https://pypi.org/project/brachinus/)
+
 ## AES-256 CBC file encryption library with support for individual files and directory batch operations.
 
 ### Supports single-file and directory batch operations + command-line usage
