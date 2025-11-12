@@ -5,8 +5,8 @@ set -e
 VERSION=1
 MINOR=0
 PATCH=
-EXTRAVERSION="-rc1"
-NOTES="(Command-line interface mode implemented.)"
+EXTRAVERSION="-rc2"
+NOTES="(#1 #2)"
 BRANCH="dev"
 
 if [[ -z $PATCH ]]; then
