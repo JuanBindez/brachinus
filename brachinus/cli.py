@@ -1,5 +1,7 @@
 import argparse
 import os
+import getpass
+
 from brachinus import AES256, encrypt_file_with_password, decrypt_file_with_password
 
 def main():
@@ -14,7 +16,6 @@ def main():
     # -----------------------------
     encrypt_file_cmd = sub.add_parser("encfile", help="Encrypt a file")
     encrypt_file_cmd.add_argument("-t", help="Input file path")
-    encrypt_file_cmd.add_argument("-p", "--password", help="Password to derive key")
     encrypt_file_cmd.add_argument("-k", "--keyfile", help="Path to binary key file")
     encrypt_file_cmd.add_argument("-o", "--output", help="Output encrypted file path")
 
@@ -23,7 +24,6 @@ def main():
     # -----------------------------
     decrypt_file_cmd = sub.add_parser("decfile", help="Decrypt a file")
     decrypt_file_cmd.add_argument("-t", help="Encrypted file path")
-    decrypt_file_cmd.add_argument("-p", "--password", help="Password to derive key")
     decrypt_file_cmd.add_argument("-k", "--keyfile", help="Key file to load key from")
     decrypt_file_cmd.add_argument("-o", "--output", help="Output decrypted file path")
 
@@ -32,7 +32,6 @@ def main():
     # -----------------------------
     encrypt_dir_cmd = sub.add_parser("encdir", help="Encrypt all files in a directory")
     encrypt_dir_cmd.add_argument("-t", help="Directory path")
-    encrypt_dir_cmd.add_argument("-p", "--password", help="Password to derive key")
     encrypt_dir_cmd.add_argument("-k", "--keyfile", help="Key file to load key")
     encrypt_dir_cmd.add_argument("-o", "--output-dir", help="Output directory")
 
@@ -41,7 +40,6 @@ def main():
     # -----------------------------
     decrypt_dir_cmd = sub.add_parser("decdir", help="Decrypt all .enc files in a directory")
     decrypt_dir_cmd.add_argument("-t", help="Directory path")
-    decrypt_dir_cmd.add_argument("-p", "--password", help="Password to derive key")
     decrypt_dir_cmd.add_argument("-k", "--keyfile", help="Key file to load key")
     decrypt_dir_cmd.add_argument("-o", "--output-dir", help="Output directory")
 
@@ -49,7 +47,6 @@ def main():
     # key-info
     # -----------------------------
     key_info_cmd = sub.add_parser("keyinfo", help="Display key information")
-    key_info_cmd.add_argument("-p", "--password", help="Password to derive key")
     key_info_cmd.add_argument("-k", "--keyfile", help="Load key from file path")
 
     # -----------------------------
@@ -66,54 +63,48 @@ def main():
 
     args = parser.parse_args()
 
-    # ------------------------------------------
-    # Create AES instance logic
-    # ------------------------------------------
-    def create_instance():
-        if args.password:
-            return AES256(password=args.password)
-        elif args.keyfile:
-            return AES256.load_from_keyfile(args.keyfile)
-        else:
-            raise ValueError("You must provide either --password or --keyfile")
-
     # --------------------------------------------------
     # Handle commands
     # --------------------------------------------------
 
     if args.command == "encfile":
-        aes = create_instance()
+        password = getpass.getpass("Enter password: ")
+        aes = AES256(password=password)
         result = aes.encrypt_file(args.t, args.output)
-        print("✅ File encrypted!")
+        print("[+] File encrypted!")
         print("Input:", result["input_file"])
         print("Output:", result["output_file"])
         print("Salt:", result["salt"])
         print("IV:", result["iv"].hex())
 
     elif args.command == "decfile":
-        aes = create_instance()
+        password = getpass.getpass("Enter password: ")
+        aes = AES256(password=password)
         output = aes.decrypt_file(args.t, args.output)
-        print("✅ File decrypted!")
+        print("[+] File decrypted!")
         print("Output:", output)
 
     elif args.command == "encdir":
-        aes = create_instance()
+        password = getpass.getpass("Enter password: ")
+        aes = AES256(password=password)
         files = aes.encrypt_directory(args.t, args.output_dir)
-        print("✅ Directory encrypted! Files:")
+        print("[+] Directory encrypted! Files:")
         for f in files:
             print(" -", f)
 
     elif args.command == "decdir":
-        aes = create_instance()
+        password = getpass.getpass("Enter password: ")
+        aes = AES256(password=password)
         files = aes.decrypt_directory(args.t, args.output_dir)
-        print("✅ Directory decrypted! Files:")
+        print("[+] Directory decrypted! Files:")
         for f in files:
             print(" -", f)
 
     elif args.command == "key-info":
-        aes = create_instance()
+        password = getpass.getpass("Enter password: ")
+        aes = AES256(password=password)
         info = aes.get_key_info()
-        print("🔑 Key info:")
+        print("[+] Key info:")
         print("Key (hex):", info["key_hex"])
         print("Salt:", info["salt"])
         print("Salt hex:", info["salt_hex"])
@@ -122,13 +113,13 @@ def main():
     elif args.command == "save-key":
         aes = AES256()  # random key
         aes.save_key(args.keyfile)
-        print("✅ Key saved!")
+        print("[+] Key saved!")
         print("Key file:", args.keyfile)
 
     elif args.command == "load-key":
         aes = AES256.load_from_keyfile(args.keyfile)
         info = aes.get_key_info()
-        print("✅ Key loaded!")
+        print("[+] Key loaded!")
         print("Key hex:", info["key_hex"])
 
     else:
