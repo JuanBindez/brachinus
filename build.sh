@@ -5,7 +5,7 @@ set -e
 VERSION=1
 MINOR=2
 PATCH=
-EXTRAVERSION="-rc1"
+EXTRAVERSION="-rc2"
 NOTES="(#5)"
 BRANCH="dev"
 
