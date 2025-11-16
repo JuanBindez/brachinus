@@ -12,7 +12,7 @@ def wai_process_message():
 
 def main():
     parser = argparse.ArgumentParser(
-        description=f"Brachinus {__version__} AES256 encryption and decryption CLI"
+        description=f"Brachinus {__version__}, Copyright (C) 2025, Juan Bindez, AES256 encryption and decryption CLI"
     )
 
     # Operações principais
