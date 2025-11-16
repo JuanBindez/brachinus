@@ -190,12 +190,6 @@ brachinus -h
 brachinus -ef input.txt
 ```
 
-### Encrypt a file with password
-
-```sh
-brachinus -ef input.txt
-```
-
 ### Decrypt a file
 
 ```sh
