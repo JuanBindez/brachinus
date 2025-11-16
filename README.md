@@ -45,33 +45,8 @@ pip install .
 
 ---
 
-# Usage (Python API)
+# Quick Start (Python API)
 
-## Encrypt a file with a password
-
-```python
-from brachinus import encrypt_file_with_password
-
-encrypt_file_with_password("example.txt", "mypassword")
-```
-
-Creates:
-
-```
-example.txt.enc
-```
-
----
-
-## Decrypt a file
-
-```python
-from brachinus import decrypt_file_with_password
-
-decrypt_file_with_password("example.txt.enc", "mypassword")
-```
-
----
 
 ## Using the AES256 Class Directly
 
@@ -80,9 +55,15 @@ decrypt_file_with_password("example.txt.enc", "mypassword")
 ```python
 from brachinus import AES256
 
-aes = AES256(password="mypassword")
-aes.encrypt_file("data.pdf")
-aes.decrypt_file("data.pdf.enc")
+PASS_WORD = "password123"
+
+crypt = AES256(password=PASS_WORD)
+crypt.encrypt_file(
+    file_path="file.txt",
+    encrypt_filename=True
+)
+
+crypt.decrypt_file("file.txt.enc")
 ```
 
 ### With a random binary key
@@ -184,10 +165,10 @@ brachinus -h
 
 ## CLI Commands
 
-### Encrypt a file
+### Encrypt a file (opitional --encryptfilename)
 
 ```sh
-brachinus -ef input.txt
+brachinus -ef input.txt --encryptfilename
 ```
 
 ### Decrypt a file
@@ -214,6 +195,17 @@ brachinus -dd myfolder_encrypted
 brachinus -ef document.pdf --keyfile aes.key
 ```
 
+### Encrypt the data/ directory, including subfolders (-r) and obfuscate filenames (--encryptfilename):
+
+```bash
+brachinus -ed data/ -r --encryptfilename
+```
+
+### Decrypt the directory, restoring the original structure and names (-r, --decryptfilename):
+
+```bash
+brachinus -dd data/_encrypted -r --decryptfilename
+```
 ---
 
 # Security Notes

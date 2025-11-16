@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brachinus"
-version = "1.2-rc2"
+version = "1.2-dev2"
 authors = [
   { name="Juan Bindez", email="juanbindez780@gmail.com" },
 ]
@@ -32,7 +32,7 @@ classifiers = [
 	"Topic :: System :: Filesystems",
 	"Topic :: Utilities",
 ]
-dependencies = ['pycryptodome']
+dependencies = ['pycryptodome', 'tqdm']
 
 [project.urls]
 "Homepage" = "https://github.com/juanbindez/brachinus"
