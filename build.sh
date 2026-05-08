@@ -3,10 +3,10 @@
 set -e
 
 VERSION=1
-MINOR=2
-PATCH=0
+MINOR=3
+PATCH=4
 EXTRAVERSION=""
-COMMIT="(#5 #6)"
+COMMIT="(#7)"
 BRANCH="main"
 
 if [[ -z $PATCH ]]; then
