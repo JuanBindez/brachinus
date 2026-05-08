@@ -4,9 +4,9 @@ set -e
 
 VERSION=1
 MINOR=3
-PATCH=4
+PATCH=5
 EXTRAVERSION=""
-COMMIT="(#7)"
+COMMIT="(patch: file error)"
 BRANCH="main"
 
 if [[ -z $PATCH ]]; then
