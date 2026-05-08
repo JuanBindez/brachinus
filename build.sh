@@ -6,7 +6,7 @@ VERSION=1
 MINOR=2
 PATCH=0
 EXTRAVERSION=""
-NOTES="(#5 #6)"
+COMMIT="(#5 #6)"
 BRANCH="main"
 
 if [[ -z $PATCH ]]; then
@@ -27,7 +27,7 @@ else
 fi
 
 git add .
-git commit -m "$FULL_VERSION $NOTES"
+git commit -s -m "$FULL_VERSION $COMMIT"
 git push -u origin $BRANCH
 git tag v$FULL_VERSION
 git push --tags

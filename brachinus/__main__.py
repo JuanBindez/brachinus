@@ -1,6 +1,6 @@
     
 """
-Copyright (C) 2025 - JuanBindez <juanbindez780@gmail.com>
+Copyright (C) 2025 - 2026  JuanBindez <juanbindez780@gmail.com>
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -19,7 +19,7 @@ with this program; if not, write to the Free Software Foundation, Inc.,
 
 import os
 import base64
-
+import shutil
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad, unpad
 from Crypto.Random import get_random_bytes
@@ -73,7 +73,7 @@ class AES256:
     def encrypt_filename(self, filename: str) -> str:
         """
         Encrypt a filename using AES-256 (password-derived key) and return
-        a URL-safe Base64 encoded string.
+        a URL-safe Base64 encoded string (replacing / with _ for filesystem safety).
 
         Parameters
         ----------
@@ -93,7 +93,8 @@ class AES256:
         cipher = AES.new(key, AES.MODE_CBC, iv)
         encrypted = cipher.encrypt(pad(raw, AES.block_size))
         packed = salt + iv + encrypted
-        return base64.urlsafe_b64encode(packed).decode("utf-8")
+        # Replace / with _ to avoid filesystem issues
+        return base64.urlsafe_b64encode(packed).decode("utf-8").replace('/', '_')
 
     def decrypt_filename(self, encrypted_name: str) -> str:
         """
@@ -109,6 +110,8 @@ class AES256:
         str
             The decrypted original filename.
         """
+        # Restore / if it was replaced
+        encrypted_name = encrypted_name.replace('_', '/')
         data = base64.urlsafe_b64decode(encrypted_name.encode("utf-8"))
         salt = data[:16]
         iv = data[16:32]
@@ -158,6 +161,8 @@ class AES256:
             if output_path is None:
                 output_path = file_path + ".enc"
 
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
         with open(file_path, "rb") as f:
             file_data = f.read()
 
@@ -172,6 +177,9 @@ class AES256:
             f.write(iv)
             f.write(encrypted_data)
 
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise Exception(f"Failed to create encrypted file:{output_path}")
+            
         return output_path
 
     def decrypt_file(self, file_path, output_path=None, decrypt_filename=False):
@@ -234,12 +242,19 @@ class AES256:
             if output_path is None:
                 output_path = file_path[:-4] if file_path.endswith(".enc") else file_path + ".dec"
 
+   
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        
         with open(output_path, "wb") as f:
             f.write(decrypted_data)
 
+
+        if not os.path.exists(output_path) or os.path.getsize(output_path) == 0:
+            raise Exception(f"Failed to create decrypted file: {output_path}")
+
         return output_path
 
-    def encrypt_directory(self, directory_path, output_dir=None, extensions=None, encrypt_filenames=False, recursive=False):
+    def encrypt_directory(self, directory_path, output_dir=None, extensions=None, encrypt_filenames=False, recursive=False, backup=False):
         """
         Encrypt all files in a directory.
 
@@ -255,6 +270,10 @@ class AES256:
             Encrypt filenames using encrypt_filename().
         recursive : bool
             If True, process subdirectories recursively.
+        backup : bool
+            If True, creates a new directory for encrypted files.
+            If False, encrypts files in place (overwrites original files with encrypted ones).
+            DEFAULT: False
 
         Returns
         -------
@@ -269,46 +288,124 @@ class AES256:
         if not os.path.exists(directory_path):
             raise FileNotFoundError(f"Directory not found: {directory_path}")
 
-        if output_dir is None:
-            output_dir = directory_path + "_encrypted"
+        
+        if not backup:
 
-        os.makedirs(output_dir, exist_ok=True)
-        encrypted_files = []
+            encrypted_files = []
 
-        for item in os.listdir(directory_path):
-            full_path = os.path.join(directory_path, item)
-
-            if os.path.isdir(full_path) and recursive:
-                new_out = os.path.join(output_dir, item)
-                os.makedirs(new_out, exist_ok=True)
-
-                encrypted_files.extend(
-                    self.encrypt_directory(
-                        full_path,
-                        new_out,
-                        extensions=extensions,
-                        encrypt_filenames=encrypt_filenames,
-                        recursive=True
-                    )
-                )
-                continue
-
-            if os.path.isfile(full_path):
-                if extensions:
-                    ext = os.path.splitext(item)[1].lower()
-                    if ext not in extensions:
+            files_to_encrypt = []
+            dirs_to_process = []
+            
+            for item in os.listdir(directory_path):
+                full_path = os.path.join(directory_path, item)
+                
+                if os.path.isdir(full_path) and recursive:
+                    dirs_to_process.append(full_path)
+                elif os.path.isfile(full_path):
+                   
+                    if item.endswith(".enc"):
                         continue
 
-                self.encrypt_file(
-                    full_path,
-                    os.path.join(output_dir, item + ".enc"),
-                    encrypt_filename=encrypt_filenames
+                    if extensions:
+                        ext = os.path.splitext(item)[1].lower()
+                        if ext not in extensions:
+                            continue
+                    
+                    files_to_encrypt.append(full_path)
+            
+            for subdir in dirs_to_process:
+                sub_encrypted = self.encrypt_directory(
+                    subdir,
+                    output_dir=None,
+                    extensions=extensions,
+                    encrypt_filenames=encrypt_filenames,
+                    recursive=True,
+                    backup=False
                 )
-                encrypted_files.append(full_path)
+                encrypted_files.extend(sub_encrypted)
+            
+            for full_path in files_to_encrypt:
+                try:
+                    base_name = os.path.basename(full_path)
+                    
+                    if encrypt_filenames:
+                        enc_name = self.encrypt_filename(base_name)
+                        encrypted_path = os.path.join(directory_path, enc_name + ".enc")
+                        
+                        result_path = self.encrypt_file(full_path, encrypted_path, encrypt_filename=encrypt_filenames)
+                        
+                      
+                        if os.path.exists(result_path) and os.path.getsize(result_path) > 0:
+                            os.unlink(full_path)
+                            encrypted_files.append(result_path)
+                           
+                        else:
+                            pass
+                    else:
+                        encrypted_path = full_path + ".enc"
 
-        return encrypted_files
+                        result_path = self.encrypt_file(full_path, encrypted_path, encrypt_filename=encrypt_filenames)
+                        
+                      
+                        if os.path.exists(result_path) and os.path.getsize(result_path) > 0:
+                            os.unlink(full_path)
+                            encrypted_files.append(result_path)
+                        else:
+                            pass
+                            
+                except Exception as e:
+                    continue
+            
+            return encrypted_files
+        
+        else:
+            
+            if output_dir is None:
+                output_dir = directory_path + "_encrypted"
+            
+            os.makedirs(output_dir, exist_ok=True)
+            encrypted_files = []
+            
+            for item in os.listdir(directory_path):
+                full_path = os.path.join(directory_path, item)
+                
+                if os.path.isdir(full_path) and recursive:
+                    new_out = os.path.join(output_dir, item)
+                    os.makedirs(new_out, exist_ok=True)
+                    
+                    encrypted_files.extend(
+                        self.encrypt_directory(
+                            full_path,
+                            new_out,
+                            extensions=extensions,
+                            encrypt_filenames=encrypt_filenames,
+                            recursive=True,
+                            backup=True
+                        )
+                    )
+                    continue
+                
+                if os.path.isfile(full_path):
+                    if item.endswith(".enc"):
+                        continue
+                        
+                    if extensions:
+                        ext = os.path.splitext(item)[1].lower()
+                        if ext not in extensions:
+                            continue
+                    
+                    output_path = os.path.join(output_dir, item + ".enc")
+            
+                    self.encrypt_file(
+                        full_path,
+                        output_path,
+                        encrypt_filename=encrypt_filenames
+                    )
+                    encrypted_files.append(output_path)
+            
+            return encrypted_files
 
-    def decrypt_directory(self, directory_path, output_dir=None, decrypt_filenames=False, recursive=False):
+    def decrypt_directory(self, directory_path, output_dir=None, decrypt_filenames=False, recursive=False, backup=False):
         """
         Decrypt all .enc files inside a directory.
 
@@ -322,6 +419,10 @@ class AES256:
             Restore original filenames if encrypted.
         recursive : bool
             Process subdirectories recursively.
+        backup : bool
+            If True, creates a new directory for decrypted files.
+            If False, decrypts files in place (overwrites encrypted files with decrypted ones).
+            DEFAULT: False
 
         Returns
         -------
@@ -335,40 +436,104 @@ class AES256:
         """
         if not os.path.exists(directory_path):
             raise FileNotFoundError(f"Directory not found: {directory_path}")
+        
+        if not backup:
+            decrypted_files = []
 
-        if output_dir is None:
-            output_dir = directory_path + "_decrypted"
+            enc_files = []
+            dirs_to_process = []
+            
+            for item in os.listdir(directory_path):
+                full_path = os.path.join(directory_path, item)
+                
+                if os.path.isdir(full_path) and recursive:
+                    dirs_to_process.append(full_path)
+                elif os.path.isfile(full_path) and item.endswith(".enc"):
+                    enc_files.append(full_path)
+            
 
-        os.makedirs(output_dir, exist_ok=True)
-        decrypted_files = []
+            for subdir in dirs_to_process:
+                sub_decrypted = self.decrypt_directory(
+                    subdir,
+                    output_dir=None,
+                    decrypt_filenames=decrypt_filenames,
+                    recursive=True,
+                    backup=False
+                )
+                decrypted_files.extend(sub_decrypted)
+            
 
-        for item in os.listdir(directory_path):
-            full_path = os.path.join(directory_path, item)
+            for full_path in enc_files:
+                try:
+                    item = os.path.basename(full_path)
+                    
+                    if decrypt_filenames:
+                        encrypted_name = item[:-4]
+                        original_name = self.decrypt_filename(encrypted_name)
+                        original_path = os.path.join(directory_path, original_name)
+                        
+                        result_path = self.decrypt_file(full_path, original_path, decrypt_filename=decrypt_filenames)
+                        
+                        if os.path.exists(result_path) and os.path.getsize(result_path) > 0:
+                            os.unlink(full_path)
+                            decrypted_files.append(result_path)
 
-            # recursive directory handling
-            if os.path.isdir(full_path) and recursive:
-                new_out = os.path.join(output_dir, item)
-                os.makedirs(new_out, exist_ok=True)
-
-                decrypted_files.extend(
-                    self.decrypt_directory(
-                        full_path,
-                        new_out,
-                        decrypt_filenames=decrypt_filenames,
-                        recursive=True
+                        else:
+                            pass
+                    else:
+                        output_path = full_path[:-4]
+                    
+                        result_path = self.decrypt_file(full_path, output_path, decrypt_filename=False)
+                        
+                     
+                        if os.path.exists(result_path) and os.path.getsize(result_path) > 0:
+                            os.unlink(full_path)
+                            decrypted_files.append(result_path)
+                         
+                        else:
+                            pass
+                            
+                except Exception as e:
+                    continue
+            
+            return decrypted_files
+        
+        else:
+            if output_dir is None:
+                output_dir = directory_path + "_decrypted"
+            
+            os.makedirs(output_dir, exist_ok=True)
+            decrypted_files = []
+            
+            for item in os.listdir(directory_path):
+                full_path = os.path.join(directory_path, item)
+                
+                if os.path.isdir(full_path) and recursive:
+                    new_out = os.path.join(output_dir, item)
+                    os.makedirs(new_out, exist_ok=True)
+                    
+                    decrypted_files.extend(
+                        self.decrypt_directory(
+                            full_path,
+                            new_out,
+                            decrypt_filenames=decrypt_filenames,
+                            recursive=True,
+                            backup=True
+                        )
                     )
-                )
-                continue
-
-            if os.path.isfile(full_path) and item.endswith(".enc"):
-                self.decrypt_file(
-                    full_path,
-                    os.path.join(output_dir, item[:-4]),
-                    decrypt_filename=decrypt_filenames
-                )
-                decrypted_files.append(full_path)
-
-        return decrypted_files
+                    continue
+                
+                if os.path.isfile(full_path) and item.endswith(".enc"):
+                    output_path = os.path.join(output_dir, item[:-4])
+    
+                    self.decrypt_file(
+                        full_path,
+                        output_path,
+                        decrypt_filename=decrypt_filenames
+                    )
+                    decrypted_files.append(output_path)
+            
+            return decrypted_files
 
 
 # Utility shortcuts
