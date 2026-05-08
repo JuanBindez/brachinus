@@ -169,7 +169,9 @@ class AES256:
             if output_path is None:
                 output_path = file_path + ".enc"
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         
         try:
             with open(file_path, "rb") as f:
@@ -274,7 +276,9 @@ class AES256:
             if output_path is None:
                 output_path = file_path[:-4] if file_path.endswith(".enc") else file_path + ".dec"
 
-        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        output_dir = os.path.dirname(output_path)
+        if output_dir:
+            os.makedirs(output_dir, exist_ok=True)
         
         try:
             with open(output_path, "wb") as f:
