@@ -178,7 +178,7 @@ def main():
     parser.add_argument("--encryptdirname", action="store_true", help="Encrypt directory names")
     parser.add_argument("--decryptdirname", action="store_true", help="Decrypt encrypted directory names")
     parser.add_argument("-r", "--recursive", action="store_true", help="Process directories recursively")
-    parser.add_argument("--backup", action="store_true", help="Create backup directories instead of in-place encryption")
+    parser.add_argument("--backup", action="store_true", help="Create backup files/directories instead of in-place processing")
     parser.add_argument("-e", "--extension", action="append", help="Only encrypt files with specific extensions (can be used multiple times)", metavar="EXT")
 
     args = parser.parse_args()
@@ -310,16 +310,25 @@ def main():
 
         try:
             print(wai_process_message())
+
             output_file = aes.encrypt_file(
                 args.encryptfile,
                 args.output,
-                encrypt_filename=args.encryptfilename
+                encrypt_filename=args.encryptfilename,
+                backup=args.backup
             )
+
+            if not args.backup:
+                if os.path.exists(args.encryptfile):
+                    os.unlink(args.encryptfile)
+
             print("[+] File encrypted!")
             print("[+] Output:", output_file)
+
         except Exception as e:
             print(f"[-] Error: {e}", file=sys.stderr)
             sys.exit(1)
+
         return
 
     if args.decryptfile:
@@ -333,19 +342,29 @@ def main():
 
         try:
             print(wai_process_message())
+
             output = aes.decrypt_file(
                 args.decryptfile,
                 args.output,
-                decrypt_filename=args.decryptfilename
+                decrypt_filename=args.decryptfilename,
+                backup=args.backup
             )
+
+            if not args.backup:
+                if os.path.exists(args.decryptfile):
+                    os.unlink(args.decryptfile)
+
             print("[+] File decrypted!")
             print("[*] Output:", output)
+
         except ValueError as e:
             print(f"[-] Decryption failed: {e}", file=sys.stderr)
             sys.exit(1)
+
         except Exception as e:
             print(f"[-] Error: {e}", file=sys.stderr)
             sys.exit(1)
+
         return
 
     if args.keyinfo:
