@@ -7,7 +7,7 @@
 
 ## AES-256 CBC file encryption library with support for individual files and directory batch operations.
 
-<img width="73" height="104" alt="brachinus_logo" src="https://github.com/user-attachments/assets/0685264c-dead-4f72-891d-174d4c30b48e" />
+<img width="78" height="104" alt="brachinus_logo" src="https://github.com/user-attachments/assets/0685264c-dead-4f72-891d-174d4c30b48e" />
 
 
 ### Supports single-file and directory batch operations + command-line usage
