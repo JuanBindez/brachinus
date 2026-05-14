@@ -9,9 +9,9 @@
 
 <h1 align="center">brachinus</h1>
 
-<p align="center">
+<h2 align="center">
   AES-256 CBC file encryption library with support for individual files and directory batch operations.
-</p>
+</h2>
 
 <p align="center">
   <a href="https://pypi.org/project/brachinus/">
