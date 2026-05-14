@@ -1,11 +1,33 @@
-# brachinus
+<p align="center">
+  <img
+    width="150"
+    height="150"
+    alt="brachinus_logo"
+    src="https://github.com/user-attachments/assets/0685264c-dead-4f72-891d-174d4c30b48e"
+  />
+</p>
 
-[![PyPI - Downloads](https://img.shields.io/pypi/dm/brachinus)](https://pypi.org/project/brachinus/)
-![PyPI - License](https://img.shields.io/pypi/l/brachinus)
-[![GitHub Tag](https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases)](https://github.com/JuanBindez/brachinus/releases)
-[![PyPI - Version](https://img.shields.io/pypi/v/brachinus)](https://pypi.org/project/brachinus/)
+<h1 align="center">brachinus</h1>
 
-## AES-256 CBC file encryption library with support for individual files and directory batch operations.
+<h2 align="center">
+  AES-256 CBC file encryption library with support for individual files and directory batch operations.
+</h2>
+
+<p align="center">
+  <a href="https://pypi.org/project/brachinus/">
+    <img src="https://img.shields.io/pypi/dm/brachinus" alt="PyPI Downloads">
+  </a>
+
+  <img src="https://img.shields.io/pypi/l/brachinus" alt="License">
+
+  <a href="https://github.com/JuanBindez/brachinus/releases">
+    <img src="https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases" alt="GitHub Tag">
+  </a>
+
+  <a href="https://pypi.org/project/brachinus/">
+    <img src="https://img.shields.io/pypi/v/brachinus" alt="PyPI Version">
+  </a>
+</p>
 
 ### Supports single-file and directory batch operations + command-line usage
 
