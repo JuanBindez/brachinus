@@ -357,7 +357,7 @@ def load_aes(args):
 def main():
     parser = argparse.ArgumentParser(
         description=(
-            f"Brachinus {__version__}, Copyright (C) 2025, "
+            f"Brachinus v{__version__}, Copyright (C) 2025 - 2026, "
             f"Juan Bindez — AES256 encryption and decryption CLI"
         )
     )
