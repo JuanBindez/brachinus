@@ -8,16 +8,16 @@
 
 <h1 align="center">brachinus</h1>
 
-<h2 align="center">
-  AES-256 CBC file encryption library for Python with support for individual files and directory batch operations.
-</h2>
-
 <p align="center">
   <img src="https://img.shields.io/pypi/dm/brachinus?style=flat-square">
   <img src="https://img.shields.io/pypi/l/brachinus?style=flat-square">
   <img src="https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases&style=flat-square">
   <img src="https://img.shields.io/pypi/v/brachinus?style=flat-square">
 </p>
+
+<h2 align="center">
+  AES-256 CBC file encryption library for Python with support for individual files and directory batch operations.
+</h2>
 
 ### Supports single-file and directory batch operations + command-line usage
 
