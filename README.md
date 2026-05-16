@@ -2,12 +2,9 @@
   <img
     width="220"
     alt="brachinus_logo"
-    src="https://github.com/user-attachments/assets/0685264c-dead-4f72-891d-174d4c30b48e"
+    src="https://github.com/user-attachments/assets/b7946b12-886d-4ec1-9eb3-14502ffe4dc8"
   />
 </p>
-
-<img width="718" height="835" alt="logo_brachinus" src="https://github.com/user-attachments/assets/b7946b12-886d-4ec1-9eb3-14502ffe4dc8" />
-
 
 <h1 align="center">brachinus</h1>
 
