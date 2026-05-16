@@ -6,6 +6,9 @@
   />
 </p>
 
+<img width="718" height="835" alt="logo_brachinus" src="https://github.com/user-attachments/assets/b7946b12-886d-4ec1-9eb3-14502ffe4dc8" />
+
+
 <h1 align="center">brachinus</h1>
 
 <p align="center">
