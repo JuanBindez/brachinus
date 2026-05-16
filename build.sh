@@ -3,10 +3,12 @@
 set -e
 
 VERSION=1
-MINOR=3
-PATCH=7
+MINOR=4
+PATCH=0
 EXTRAVERSION=""
-COMMIT="(#9)"
+COMMIT="(#10)
+Assisted-by: ChatGPT:gpt-5.5
+"
 BRANCH="main"
 
 if [[ -z $PATCH ]]; then
