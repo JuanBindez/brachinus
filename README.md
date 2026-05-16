@@ -57,7 +57,7 @@ Or install from source:
 
 ---
 
-# Quick Start (Python API)
+## Quick Start (Python API)
 
 ## Using the AES256 Class Directly
 
@@ -90,7 +90,7 @@ loaded = AES256.load_from_keyfile("aes.key")
 ```
 ---
 
-# Directory Encryption
+## Directory Encryption
 
 ### Basic directory encryption (in-place)
 
@@ -136,7 +136,7 @@ aes.encrypt_directory(
 ```
 ---
 
-# Directory Decryption
+## Directory Decryption
 
 ### Basic directory decryption (in-place)
 
@@ -176,7 +176,7 @@ aes.decrypt_directory(
 ```
 ---
 
-# Key Information
+## Key Information
 
 ```python
 info = aes.get_key_info()
@@ -195,7 +195,7 @@ Example:
 
 ---
 
-# Internal Encrypted File Format
+## Internal Encrypted File Format
 
 [4 bytes salt_length] [salt (if present)] [16-byte IV] [encrypted_data]
 
@@ -205,7 +205,7 @@ Example:
 
 ---
 
-# Command Line Interface (CLI)
+## Command Line Interface (CLI)
 
 Brachinus includes a terminal command: brachinus
 
