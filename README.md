@@ -1,7 +1,6 @@
 <p align="center">
   <img
-    width="150"
-    height="150"
+    width="220"
     alt="brachinus_logo"
     src="https://github.com/user-attachments/assets/0685264c-dead-4f72-891d-174d4c30b48e"
   />
@@ -9,26 +8,16 @@
 
 <h1 align="center">brachinus</h1>
 
-<h2 align="center">
-  AES-256 CBC file encryption library with support for individual files and directory batch operations.
-</h2>
-
 <p align="center">
-  <a href="https://pypi.org/project/brachinus/">
-    <img src="https://img.shields.io/pypi/dm/brachinus" alt="PyPI Downloads">
-  </a>
-
-  <img src="https://img.shields.io/pypi/l/brachinus" alt="License">
-
-  <a href="https://github.com/JuanBindez/brachinus/releases">
-    <img src="https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases" alt="GitHub Tag">
-  </a>
-
-  <a href="https://pypi.org/project/brachinus/">
-    <img src="https://img.shields.io/pypi/v/brachinus" alt="PyPI Version">
-  </a>
+  AES-256 CBC file encryption library for Python with support for individual files and directory batch operations.
 </p>
 
+<p align="center">
+  <img src="https://img.shields.io/pypi/dm/brachinus?style=flat-square">
+  <img src="https://img.shields.io/pypi/l/brachinus?style=flat-square">
+  <img src="https://img.shields.io/github/v/tag/JuanBindez/brachinus?include_prereleases&style=flat-square">
+  <img src="https://img.shields.io/pypi/v/brachinus?style=flat-square">
+</p>
 ### Supports single-file and directory batch operations + command-line usage
 
 Brachinus is a simple, secure, and feature-rich AES-256 encryption library for Python.  
