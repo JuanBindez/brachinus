@@ -4,7 +4,7 @@ set -e
 
 VERSION=1
 MINOR=5
-PATCH=3
+PATCH=4
 EXTRAVERSION=""
 COMMIT="Fixes Pypi Files(#11)"
 BRANCH="main"
