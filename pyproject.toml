@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brachinus"
-version = "1.4.0"
+version = "1.5rc1"
 authors = [
   { name="Juan Bindez", email="juanbindez780@gmail.com" },
 ]
@@ -20,11 +20,12 @@ classifiers = [
 	"License :: OSI Approved :: GNU General Public License v2 (GPLv2)",
 	"Natural Language :: English",
 	"Operating System :: OS Independent",
-	"Programming Language :: Python :: 3.8",
 	"Programming Language :: Python :: 3.9",
 	"Programming Language :: Python :: 3.10",
 	"Programming Language :: Python :: 3.11",
 	"Programming Language :: Python :: 3.12",
+	"Programming Language :: Python :: 3.13",
+	"Programming Language :: Python :: 3.14",
 	"Programming Language :: Python",
 	"Topic :: Security :: Cryptography",
 	"Topic :: Software Development :: Libraries :: Python Modules",

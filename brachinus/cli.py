@@ -1,671 +1,726 @@
+#!/usr/bin/env python3
+"""brachinus - command line interface for the brachinus AES256 library.
+
+    brachinus encrypt [options] [FILE...]
+    brachinus decrypt [options] [FILE...]
+    brachinus key generate FILE
+    brachinus key show [--reveal] FILE
+
+All cryptography is done by brachinus.AES256; this module only handles the
+command line, file selection, naming, error reporting and safe output.
+
+Conventions followed:
+  * silence on success; messages go to stderr, data goes to stdout;
+  * errors look like "brachinus: FILE: message" and set a non-zero status;
+  * '-' (or no FILE) means stdin/stdout, so it works in pipelines;
+  * a failure on one file does not stop the others;
+  * outputs are produced in a private temp dir and renamed into place;
+  * originals are kept unless --remove is given.
+
+Exit status: 0 success, 1 runtime error, 2 usage error, 130 interrupted.
+"""
+
 import argparse
-import os
+import base64
+import contextlib
 import getpass
+import hashlib
+import os
+import shutil
+import signal
+import stat
 import sys
+import tempfile
+
 from tqdm import tqdm
 
 from brachinus.version import __version__
 from brachinus import AES256
 
+PROG = "brachinus"
+SUFFIX = ".enc"
+NAME_MAX = 255  # bytes per path component on most filesystems
 
-def wai_process_message():
-    return "[*] Processing. Please wait..."
+
+# --------------------------------------------------------------------------
+# Errors and logging
+# --------------------------------------------------------------------------
+
+class CliError(Exception):
+    def __init__(self, message, path=None):
+        super().__init__(message)
+        self.message = message
+        self.path = path
 
 
-def ensure_parent(path):
-    parent = os.path.dirname(path)
+class Fatal(CliError):
+    """Aborts the whole run instead of just the current file."""
 
-    if parent and not os.path.exists(parent):
+
+class Log:
+    def __init__(self, verbose=False, quiet=False):
+        self.quiet = quiet
+        self.verbose = verbose and not quiet
+        self.failures = 0
+
+    @staticmethod
+    def _emit(msg):
+        # tqdm.write keeps an active progress bar intact
+        tqdm.write(f"{PROG}: {msg}", file=sys.stderr)
+
+    def error(self, msg):
+        self.failures += 1
+        self._emit(msg)
+
+    def warn(self, msg):
+        if not self.quiet:
+            self._emit(f"warning: {msg}")
+
+    def note(self, msg):
+        if self.verbose:
+            self._emit(msg)
+
+    def fail(self, exc, path=None):
+        if isinstance(exc, CliError):
+            where, msg = exc.path or path, exc.message
+        elif isinstance(exc, OSError):
+            where, msg = exc.filename or path, exc.strerror or str(exc)
+        else:
+            where, msg = path, str(exc)
+        self.error(f"{where}: {msg}" if where else msg)
+
+
+# --------------------------------------------------------------------------
+# Cipher: key file or password -> AES256 (created lazily, once per run)
+# --------------------------------------------------------------------------
+
+def read_password(args, confirm):
+    try:
+        if args.password_file:
+            with open(args.password_file, "r", encoding="utf-8") as f:
+                password = f.readline()
+        elif args.password_fd is not None:
+            with os.fdopen(args.password_fd, "r", encoding="utf-8", closefd=False) as f:
+                password = f.readline()
+        else:
+            password = getpass.getpass("Password: ")
+
+            if confirm and getpass.getpass("Verify password: ") != password:
+                raise Fatal("passwords do not match")
+    except EOFError:
+        raise Fatal("unexpected end of input while reading the password")
+    except OSError as e:
+        raise Fatal(e.strerror or str(e), e.filename)
+
+    password = password.rstrip("\r\n")
+
+    if not password:
+        raise Fatal("empty password")
+
+    return password
+
+
+class Cipher:
+    def __init__(self, args, confirm, log):
+        self._args = args
+        self._confirm = confirm
+        self._log = log
+        self._aes = None
+
+    @property
+    def aes(self):
+        if self._aes is None:
+            self._aes = self._build()
+
+        return self._aes
+
+    def _build(self):
+        args = self._args
+
+        if args.key_file:
+            if os.stat(args.key_file).st_mode & 0o077:
+                self._log.warn(f"{args.key_file}: key file is accessible by other users (chmod 600)")
+
+            with open(args.key_file, "rb") as f:
+                key = f.read()
+
+            try:
+                return AES256(key=key)
+            except Exception as e:
+                raise Fatal(str(e), args.key_file)
+
+        password = read_password(args, self._confirm)
+
+        try:
+            return AES256(password=password)
+        except Exception as e:
+            raise Fatal(str(e))
+
+
+class Names:
+    """Filename encryption through AES256.encrypt_name / decrypt_name."""
+
+    def __init__(self, cipher):
+        self._cipher = cipher
+        self._cache = {}
+
+    def encrypt(self, name):
+        if name not in self._cache:
+            token = self._cipher.aes.encrypt_name(name)
+
+            if not isinstance(token, str) or not token or "/" in token or "\x00" in token:
+                raise CliError(f"cannot use the encrypted form of {name!r} as a file name")
+
+            self._cache[name] = token
+
+        return self._cache[name]
+
+    def decrypt(self, token):
+        """Original name if token is an encrypted name; otherwise token itself."""
+        try:
+            name = self._cipher.aes.decrypt_name(token)
+        except Exception:
+            return token
+
+        if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\x00" in name:
+            return token
+
+        return name
+
+
+# --------------------------------------------------------------------------
+# Doing the work: one file, one output, atomically
+# --------------------------------------------------------------------------
+
+def current_umask():
+    mask = os.umask(0)
+    os.umask(mask)
+    return mask
+
+
+def process(encrypting, aes, src, dest, force):
+    """src: path or None (stdin). dest: path or '-' (stdout)."""
+    if dest == "-":
+        parent = None
+    else:
+        if os.path.lexists(dest) and not force:
+            raise CliError("already exists (use -f to overwrite)", dest)
+
+        if os.path.isdir(dest):
+            raise CliError("is a directory", dest)
+
+        parent = os.path.dirname(dest) or "."
         os.makedirs(parent, exist_ok=True)
 
+    # Private (0700) work dir next to the destination, so the final rename is atomic.
+    with tempfile.TemporaryDirectory(prefix=".brachinus-", dir=parent) as work:
+        if src is None:
+            src_path = os.path.join(work, "stdin" if encrypting else "stdin" + SUFFIX)
 
-def build_encrypt_backup_base(aes, directory_path, output_dir, encrypt_dirnames):
-    if output_dir:
-        return output_dir
+            with open(src_path, "wb") as f:
+                shutil.copyfileobj(sys.stdin.buffer, f)
 
-    if encrypt_dirnames:
-        dir_name = os.path.basename(os.path.normpath(directory_path))
-        enc_dir_name = aes.encrypt_name(dir_name)
-        return os.path.join(
-            os.path.dirname(directory_path),
-            enc_dir_name + "_encrypted"
-        )
-
-    return directory_path + "_encrypted"
-
-
-def build_decrypt_backup_base(aes, directory_path, output_dir, decrypt_dirnames):
-    if output_dir:
-        return output_dir
-
-    if decrypt_dirnames:
-        try:
-            dir_name = os.path.basename(os.path.normpath(directory_path))
-            original_name = aes.decrypt_name(dir_name)
-
-            return os.path.join(
-                os.path.dirname(directory_path),
-                original_name + "_decrypted"
+            mode = 0o666 & ~current_umask()
+        else:
+            src_path = src
+            mode = (
+                stat.S_IMODE(os.stat(src).st_mode)
+                if encrypting
+                else 0o666 & ~current_umask()
             )
 
-        except Exception:
-            pass
+        out_path = os.path.join(work, "out" + SUFFIX if encrypting else "out")
 
-    return directory_path + "_decrypted"
-
-
-def encrypt_directory_with_progress(
-    aes,
-    directory_path,
-    output_dir,
-    extensions,
-    encrypt_filenames,
-    encrypt_dirnames,
-    recursive,
-    backup,
-    total_files
-):
-    backup_base = None
-
-    if backup:
-        backup_base = build_encrypt_backup_base(
-            aes,
-            directory_path,
-            output_dir,
-            encrypt_dirnames
-        )
-
-        os.makedirs(backup_base, exist_ok=True)
-
-    with tqdm(total=total_files, desc="[*] Encrypting", ncols=80) as bar:
-        for root, dirs, files in os.walk(directory_path):
-            if not recursive:
-                dirs[:] = []
-
-            if backup and encrypt_dirnames:
-                relative_root = os.path.relpath(root, directory_path)
-
-                if relative_root == ".":
-                    current_backup_root = backup_base
-                else:
-                    encrypted_parts = []
-
-                    for part in relative_root.split(os.sep):
-                        encrypted_parts.append(aes.encrypt_name(part))
-
-                    current_backup_root = os.path.join(
-                        backup_base,
-                        *encrypted_parts
-                    )
-            elif backup:
-                relative_root = os.path.relpath(root, directory_path)
-
-                if relative_root == ".":
-                    current_backup_root = backup_base
-                else:
-                    current_backup_root = os.path.join(
-                        backup_base,
-                        relative_root
-                    )
-
-            for file in files:
-                if file.endswith(".enc"):
-                    continue
-
-                if extensions:
-                    ext = os.path.splitext(file)[1].lower()
-
-                    if ext not in extensions:
-                        continue
-
-                full_path = os.path.join(root, file)
-
-                if backup:
-                    if encrypt_filenames:
-                        encrypted_filename = aes.encrypt_name(file) + ".enc"
-                    else:
-                        encrypted_filename = file + ".enc"
-
-                    new_path = os.path.join(
-                        current_backup_root,
-                        encrypted_filename
-                    )
-                else:
-                    if encrypt_filenames:
-                        encrypted_filename = aes.encrypt_name(file) + ".enc"
-                        new_path = os.path.join(root, encrypted_filename)
-                    else:
-                        new_path = full_path + ".enc"
-
-                ensure_parent(new_path)
-
-                aes.encrypt_file(
-                    full_path,
-                    new_path,
-                    encrypt_filename=False,
-                    backup=True
+        try:
+            if encrypting:
+                produced = aes.encrypt_file(
+                    src_path, out_path, encrypt_filename=False, backup=True
                 )
-
-                if not backup and os.path.exists(full_path):
-                    os.unlink(full_path)
-
-                bar.update(1)
-
-        if encrypt_dirnames and not backup:
-            for root, dirs, files in os.walk(directory_path, topdown=False):
-                for dir_name in dirs:
-                    full_dir_path = os.path.join(root, dir_name)
-
-                    try:
-                        encrypted_name = aes.encrypt_name(dir_name)
-
-                        new_dir_path = os.path.join(
-                            root,
-                            encrypted_name
-                        )
-
-                        if (
-                            os.path.exists(full_dir_path)
-                            and not os.path.exists(new_dir_path)
-                        ):
-                            os.rename(full_dir_path, new_dir_path)
-
-                    except Exception:
-                        pass
-
-                if not recursive:
-                    break
-
-
-def decrypt_directory_with_progress(
-    aes,
-    directory_path,
-    output_dir,
-    decrypt_filenames,
-    decrypt_dirnames,
-    recursive,
-    backup,
-    total_files
-):
-    backup_base = None
-
-    if backup:
-        backup_base = build_decrypt_backup_base(
-            aes,
-            directory_path,
-            output_dir,
-            decrypt_dirnames
-        )
-
-        os.makedirs(backup_base, exist_ok=True)
-
-    with tqdm(total=total_files, desc="[*] Decrypting", ncols=80) as bar:
-        for root, dirs, files in os.walk(directory_path):
-            if not recursive:
-                dirs[:] = []
-
-            if backup and decrypt_dirnames:
-                relative_root = os.path.relpath(root, directory_path)
-
-                if relative_root == ".":
-                    current_backup_root = backup_base
-                else:
-                    decrypted_parts = []
-
-                    for part in relative_root.split(os.sep):
-                        try:
-                            decrypted_parts.append(aes.decrypt_name(part))
-                        except Exception:
-                            decrypted_parts.append(part)
-
-                    current_backup_root = os.path.join(
-                        backup_base,
-                        *decrypted_parts
-                    )
-            elif backup:
-                relative_root = os.path.relpath(root, directory_path)
-
-                if relative_root == ".":
-                    current_backup_root = backup_base
-                else:
-                    current_backup_root = os.path.join(
-                        backup_base,
-                        relative_root
-                    )
-
-            for file in files:
-                if not file.endswith(".enc"):
-                    continue
-
-                full_path = os.path.join(root, file)
-
-                if backup:
-                    if decrypt_filenames:
-                        encrypted_name = file[:-4]
-
-                        try:
-                            output_name = aes.decrypt_name(encrypted_name)
-                        except Exception:
-                            output_name = encrypted_name
-                    else:
-                        output_name = file[:-4]
-
-                    new_path = os.path.join(
-                        current_backup_root,
-                        output_name
-                    )
-                else:
-                    if decrypt_filenames:
-                        encrypted_name = file[:-4]
-
-                        try:
-                            output_name = aes.decrypt_name(encrypted_name)
-                        except Exception:
-                            output_name = encrypted_name
-
-                        new_path = os.path.join(root, output_name)
-                    else:
-                        new_path = full_path[:-4]
-
-                ensure_parent(new_path)
-
-                aes.decrypt_file(
-                    full_path,
-                    new_path,
-                    decrypt_filename=False,
-                    backup=True
+            else:
+                produced = aes.decrypt_file(
+                    src_path, out_path, decrypt_filename=False, backup=True
                 )
+        except OSError:
+            raise
+        except Exception as e:
+            if encrypting:
+                raise CliError(f"encryption failed: {e}")
 
-                if not backup and os.path.exists(full_path):
-                    os.unlink(full_path)
+            raise CliError(f"decryption failed: {e} (wrong password/key or corrupted file?)")
 
-                bar.update(1)
+        result = out_path
 
-        if decrypt_dirnames and not backup:
-            for root, dirs, files in os.walk(directory_path, topdown=False):
-                for dir_name in dirs:
-                    full_dir_path = os.path.join(root, dir_name)
+        if isinstance(produced, (str, os.PathLike)) and os.path.exists(produced):
+            result = os.fspath(produced)
 
-                    try:
-                        original_name = aes.decrypt_name(dir_name)
+        if not os.path.exists(result):
+            raise CliError("the library did not produce an output file")
 
-                        original_dir_path = os.path.join(
-                            root,
-                            original_name
-                        )
+        if dest == "-":
+            with open(result, "rb") as f:
+                shutil.copyfileobj(f, sys.stdout.buffer)
 
-                        if (
-                            original_name != dir_name
-                            and not os.path.exists(original_dir_path)
-                        ):
-                            os.rename(full_dir_path, original_dir_path)
-
-                    except Exception:
-                        pass
-
-                if not recursive:
-                    break
+            sys.stdout.buffer.flush()
+        else:
+            os.chmod(result, mode)
+            os.replace(result, dest)
 
 
-def count_encrypt_files(directory_path, recursive, extensions):
-    total = 0
+def prune_empty_dirs(removed, tops):
+    """After --remove, drop directories that were emptied by it."""
 
-    for root, dirs, files in os.walk(directory_path):
-        if not recursive:
-            dirs[:] = []
+    def inside(d):
+        return any(d == t or d.startswith(t + os.sep) for t in tops)
 
-        for file in files:
-            if file.endswith(".enc"):
+    dirs = set()
+
+    for path in removed:
+        d = os.path.dirname(path)
+
+        while d and inside(d) and d not in dirs:
+            dirs.add(d)
+            d = os.path.dirname(d)
+
+    for d in sorted(dirs, key=len, reverse=True):
+        with contextlib.suppress(OSError):
+            os.rmdir(d)
+
+
+# --------------------------------------------------------------------------
+# Planning: which file goes where
+# --------------------------------------------------------------------------
+
+def output_is_dir(args):
+    out = args.output
+
+    if not out or out == "-":
+        return False
+
+    return (
+        os.path.isdir(out)
+        or out.endswith(("/", os.sep))
+        or len(args.files) > 1
+        or any(f != "-" and os.path.isdir(f) for f in args.files)
+    )
+
+
+def dir_parts(arg):
+    """(normalized path, directory's own name, directory containing it)."""
+    base = os.path.normpath(arg)
+    top = os.path.basename(os.path.abspath(arg))
+
+    if os.path.basename(base) in (".", ".."):
+        parent = os.path.dirname(os.path.abspath(arg))
+    else:
+        parent = os.path.dirname(base)
+
+    return base, top, parent
+
+
+def check_length(name, original, encrypted):
+    size = len(os.fsencode(name))
+
+    if size > NAME_MAX:
+        if encrypted:
+            raise CliError(
+                f"encrypted name of {original!r} is {size} bytes (limit {NAME_MAX}); "
+                "use a shorter name or drop --encrypt-names"
+            )
+
+        raise CliError(f"File name too long ({size} bytes, limit {NAME_MAX})")
+
+
+def enc_component(names, name, args, suffix=""):
+    out = names.encrypt(name) if args.encrypt_names else name
+    out += suffix
+    check_length(out, name, args.encrypt_names)
+    return out
+
+
+def plan_encrypt(args, names, log):
+    """Returns ([(src, dest)], [top_dirs])."""
+    jobs, tops = [], []
+    out = args.output
+    into_dir = output_is_dir(args)
+
+    for arg in args.files:
+        if arg == "-":
+            jobs.append((None, out or "-"))
+            continue
+
+        if not os.path.lexists(arg):
+            log.error(f"{arg}: No such file or directory")
+            continue
+
+        if not os.path.isdir(arg):
+            try:
+                if out == "-":
+                    dest = "-"
+                elif out and not into_dir:
+                    dest = out
+                else:
+                    outname = enc_component(names, os.path.basename(arg), args, SUFFIX)
+                    dest = os.path.join(out if into_dir else os.path.dirname(arg), outname)
+            except CliError as e:
+                log.error(f"{arg}: {e.message}")
                 continue
 
-            if extensions:
-                ext = os.path.splitext(file)[1].lower()
+            jobs.append((arg, dest))
+            continue
 
-                if ext not in extensions:
+        if not args.recursive:
+            log.error(f"{arg}: is a directory (use -r)")
+            continue
+
+        base, top, parent = dir_parts(arg)
+
+        if not top:
+            log.error(f"{arg}: cannot process the root directory")
+            continue
+
+        try:
+            top_out = enc_component(names, top, args, SUFFIX)
+        except CliError as e:
+            log.error(f"{arg}: {e.message}")
+            continue
+
+        if out and len(args.files) == 1:
+            outroot = out
+        elif out:
+            outroot = os.path.join(out, top_out)
+        else:
+            outroot = os.path.join(parent, top_out)
+
+        skip = os.path.abspath(outroot)
+        tops.append(base)
+        count = 0
+
+        for root, dirs, files in os.walk(base, onerror=log.fail):
+            dirs[:] = sorted(
+                d for d in dirs if os.path.abspath(os.path.join(root, d)) != skip
+            )
+            rel = os.path.relpath(root, base)
+
+            try:
+                parts = [] if rel == "." else [
+                    enc_component(names, p, args) for p in rel.split(os.sep)
+                ]
+            except CliError as e:
+                log.error(f"{root}: {e.message}")
+                dirs[:] = []
+                continue
+
+            outdir = os.path.join(outroot, *parts)
+
+            for f in sorted(files):
+                src = os.path.join(root, f)
+
+                if f.endswith(SUFFIX):
                     continue
 
-            total += 1
+                if args.ext and os.path.splitext(f)[1].lower() not in args.ext:
+                    continue
 
-    return total
+                if not os.path.isfile(src):
+                    log.warn(f"{src}: not a regular file, skipped")
+                    continue
 
+                try:
+                    outname = enc_component(names, f, args, SUFFIX)
+                except CliError as e:
+                    log.error(f"{src}: {e.message}")
+                    continue
 
-def count_decrypt_files(directory_path, recursive):
-    total = 0
+                jobs.append((src, os.path.join(outdir, outname)))
+                count += 1
 
-    for root, dirs, files in os.walk(directory_path):
-        if not recursive:
-            dirs[:] = []
+        if not count:
+            log.warn(f"{arg}: no files to encrypt")
 
-        for file in files:
-            if file.endswith(".enc"):
-                total += 1
-
-    return total
-
-
-def load_aes(args):
-    if args.keyfile:
-        with open(args.keyfile, "rb") as f:
-            key = f.read()
-
-        return AES256(key=key)
-
-    password = getpass.getpass("[?] Enter password: ")
-    return AES256(password=password)
+    return jobs, tops
 
 
-def main():
-    parser = argparse.ArgumentParser(
-        description=(
-            f"Brachinus v{__version__}, Copyright (C) 2025 - 2026, "
-            f"Juan Bindez — AES256 encryption and decryption CLI"
-        )
-    )
+def plan_decrypt(args, names, log):
+    """Returns ([(src, dest)], [top_dirs])."""
+    jobs, tops = [], []
+    out = args.output
+    into_dir = output_is_dir(args)
 
-    operation_group = parser.add_mutually_exclusive_group(required=True)
+    for arg in args.files:
+        if arg == "-":
+            if out and out != "-" and os.path.isdir(out):
+                log.error("(stdin): -o must be a file, not a directory")
+                continue
 
-    operation_group.add_argument(
-        "-ef",
-        "--encryptfile",
-        help="Encrypt a file",
-        metavar="FILE"
-    )
+            jobs.append((None, out or "-"))
+            continue
 
-    operation_group.add_argument(
-        "-df",
-        "--decryptfile",
-        help="Decrypt a file",
-        metavar="FILE"
-    )
+        if not os.path.lexists(arg):
+            log.error(f"{arg}: No such file or directory")
+            continue
 
-    operation_group.add_argument(
-        "-ed",
-        "--encryptdir",
-        help="Encrypt all files in a directory",
-        metavar="DIR"
-    )
+        if not os.path.isdir(arg):
+            if out == "-":
+                dest = "-"
+            elif out and not into_dir:
+                dest = out
+            else:
+                fname = os.path.basename(arg)
 
-    operation_group.add_argument(
-        "-dd",
-        "--decryptdir",
-        help="Decrypt all .enc files in a directory",
-        metavar="DIR"
-    )
+                if not fname.endswith(SUFFIX) or fname == SUFFIX:
+                    log.error(f"{arg}: unknown suffix (expected {SUFFIX}); use -o FILE")
+                    continue
 
-    operation_group.add_argument(
-        "-ki",
-        "--keyinfo",
-        action="store_true",
-        help="Display key information"
-    )
+                dest = os.path.join(
+                    out if into_dir else os.path.dirname(arg),
+                    names.decrypt(fname[: -len(SUFFIX)]),
+                )
 
-    operation_group.add_argument(
-        "-sk",
-        "--savekey",
-        help="Save binary AES key to a file",
-        metavar="KEYFILE"
-    )
+            jobs.append((arg, dest))
+            continue
 
-    operation_group.add_argument(
-        "-lk",
-        "--loadkey",
-        help="Load key and print info",
-        metavar="KEYFILE"
-    )
+        if not args.recursive:
+            log.error(f"{arg}: is a directory (use -r)")
+            continue
 
-    parser.add_argument(
-        "-o",
-        "--output",
-        help="Output file/directory path"
-    )
+        base, top, parent = dir_parts(arg)
 
-    parser.add_argument(
-        "-k",
-        "--keyfile",
-        help="Path to binary key file"
-    )
+        if not top:
+            log.error(f"{arg}: cannot process the root directory")
+            continue
 
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Verbose output"
-    )
+        if top.endswith(SUFFIX) and top != SUFFIX:
+            top_out = names.decrypt(top[: -len(SUFFIX)])
+        else:
+            top_out = top + "_decrypted"
 
-    parser.add_argument(
-        "--encryptfilename",
-        action="store_true",
-        help="Encrypt filenames"
-    )
+        if out and len(args.files) == 1:
+            outroot = out
+        elif out:
+            outroot = os.path.join(out, top_out)
+        else:
+            outroot = os.path.join(parent, top_out)
 
-    parser.add_argument(
-        "--decryptfilename",
-        action="store_true",
-        help="Decrypt encrypted filenames"
-    )
+        tops.append(base)
+        count = 0
 
-    parser.add_argument(
-        "--encryptdirname",
-        action="store_true",
-        help="Encrypt directory names"
-    )
+        for root, dirs, files in os.walk(base, onerror=log.fail):
+            dirs.sort()
+            rel = os.path.relpath(root, base)
+            parts = [] if rel == "." else [names.decrypt(p) for p in rel.split(os.sep)]
+            outdir = os.path.join(outroot, *parts)
 
-    parser.add_argument(
-        "--decryptdirname",
-        action="store_true",
-        help="Decrypt encrypted directory names"
-    )
+            for f in sorted(files):
+                if f.endswith(SUFFIX) and f != SUFFIX:
+                    jobs.append(
+                        (os.path.join(root, f),
+                         os.path.join(outdir, names.decrypt(f[: -len(SUFFIX)])))
+                    )
+                    count += 1
 
-    parser.add_argument(
-        "-r",
-        "--recursive",
-        action="store_true",
-        help="Process directories recursively"
-    )
+        if not count:
+            log.warn(f"{arg}: no {SUFFIX} files found")
 
-    parser.add_argument(
-        "--backup",
-        action="store_true",
-        help="Create backup files/directories instead of in-place processing"
-    )
+    return jobs, tops
 
-    parser.add_argument(
-        "-e",
-        "--extension",
-        action="append",
-        help="Only process files with specific extensions",
-        metavar="EXT"
-    )
 
-    args = parser.parse_args()
+# --------------------------------------------------------------------------
+# Commands
+# --------------------------------------------------------------------------
 
-    if args.extension:
-        args.extension = [
-            ext.lower() if ext.startswith(".") else "." + ext.lower()
-            for ext in args.extension
+def run_crypto(args, parser, log):
+    encrypting = args.cmd == "encrypt"
+
+    if not args.files:
+        if sys.stdin.isatty():
+            parser.error("no input files (use '-' for stdin)")
+
+        args.files = ["-"]
+
+    if "-" in args.files and len(args.files) > 1:
+        parser.error("'-' (stdin) cannot be combined with other files")
+
+    if args.output == "-":
+        if len(args.files) != 1 or (args.files[0] != "-" and os.path.isdir(args.files[0])):
+            parser.error("'-o -' needs exactly one input file")
+
+        if args.remove:
+            parser.error("--remove cannot be combined with '-o -'")
+
+    if encrypting:
+        args.ext = [
+            e.lower() if e.startswith(".") else "." + e.lower() for e in (args.ext or [])
         ]
 
-    if args.encryptdir:
-        aes = load_aes(args)
+    cipher = Cipher(args, confirm=encrypting, log=log)
+    names = Names(cipher)
+    jobs, tops = (plan_encrypt if encrypting else plan_decrypt)(args, names, log)
+
+    if encrypting and sys.stdout.isatty() and any(dest == "-" for _, dest in jobs):
+        raise Fatal("refusing to write encrypted data to a terminal (use -o FILE or redirect)")
+
+    if jobs:
+        cipher.aes  # asks for the password once, before any work starts
+
+    show_bar = (
+        not (args.quiet or args.verbose) and sys.stderr.isatty() and len(jobs) > 1
+    )
+    removed = []
+
+    with tqdm(
+        total=len(jobs),
+        desc="Encrypting" if encrypting else "Decrypting",
+        unit="file",
+        file=sys.stderr,
+        disable=not show_bar,
+        leave=False,
+    ) as bar:
+        for src, dest in jobs:
+            label = src or "(stdin)"
+
+            try:
+                process(encrypting, cipher.aes, src, dest, args.force)
+                log.note(f"{label} -> {'(stdout)' if dest == '-' else dest}")
+
+                if args.remove and src is not None:
+                    os.unlink(src)
+                    removed.append(src)
+            except (KeyboardInterrupt, Fatal):
+                raise
+            except Exception as e:
+                log.fail(e, label)
+
+            bar.update(1)
+
+    if removed:
+        prune_empty_dirs(removed, tops)
+
+
+def cmd_key(args, log):
+    if args.keycmd == "generate":
+        if os.path.lexists(args.path) and not args.force:
+            raise CliError("already exists (use -f to overwrite)", args.path)
+
+        aes = AES256()
+        old = os.umask(0o077)
 
         try:
-            print("[*] Counting files...")
+            aes.save_key(args.path)
+        finally:
+            os.umask(old)
 
-            total_files = count_encrypt_files(
-                args.encryptdir,
-                args.recursive,
-                args.extension
-            )
-
-            if total_files == 0:
-                print("[!] No files to encrypt")
-                return
-
-            encrypt_directory_with_progress(
-                aes=aes,
-                directory_path=args.encryptdir,
-                output_dir=args.output,
-                extensions=args.extension,
-                encrypt_filenames=args.encryptfilename,
-                encrypt_dirnames=args.encryptdirname,
-                recursive=args.recursive,
-                backup=args.backup,
-                total_files=total_files
-            )
-
-            print("[+] Directory encryption completed")
-
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
-
+        os.chmod(args.path, 0o600)
+        log.note(f"key written to {args.path}")
         return
 
-    if args.decryptdir:
-        aes = load_aes(args)
+    if os.stat(args.path).st_mode & 0o077:
+        log.warn(f"{args.path}: key file is accessible by other users (chmod 600)")
 
-        try:
-            print("[*] Counting files...")
+    info = AES256.load_from_keyfile(args.path).get_key_info()
 
-            total_files = count_decrypt_files(
-                args.decryptdir,
-                args.recursive
-            )
-
-            if total_files == 0:
-                print("[!] No .enc files found")
-                return
-
-            decrypt_directory_with_progress(
-                aes=aes,
-                directory_path=args.decryptdir,
-                output_dir=args.output,
-                decrypt_filenames=args.decryptfilename,
-                decrypt_dirnames=args.decryptdirname,
-                recursive=args.recursive,
-                backup=args.backup,
-                total_files=total_files
-            )
-
-            print("[+] Directory decryption completed")
-
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
-
+    if args.reveal:
+        print(info["key_hex"])
         return
 
-    if args.encryptfile:
-        aes = load_aes(args)
+    digest = hashlib.sha256(bytes.fromhex(info["key_hex"])).digest()
+    print(f"type:         {info['key_type']}")
+    print(f"fingerprint:  SHA256:{base64.b64encode(digest).decode().rstrip('=')}")
 
-        try:
-            print(wai_process_message())
 
-            output_file = aes.encrypt_file(
-                args.encryptfile,
-                args.output,
-                encrypt_filename=args.encryptfilename,
-                backup=args.backup
-            )
+# --------------------------------------------------------------------------
+# Argument parsing
+# --------------------------------------------------------------------------
 
-            print("[+] File encrypted!")
-            print("[+] Output:", output_file)
+def add_verbosity(p, default):
+    p.add_argument("-v", "--verbose", action="store_true", default=default,
+                   help="print one line per file on stderr")
+    p.add_argument("-q", "--quiet", action="store_true", default=default,
+                   help="suppress warnings and progress")
 
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
 
-        return
+def add_common(p):
+    add_verbosity(p, argparse.SUPPRESS)
 
-    if args.decryptfile:
-        aes = load_aes(args)
+    p.add_argument("files", nargs="*", metavar="FILE",
+                   help="files or directories ('-' or none: stdin)")
 
-        try:
-            print(wai_process_message())
+    secret = p.add_mutually_exclusive_group()
+    secret.add_argument("-k", "--key-file", metavar="FILE",
+                        help="use the binary key in FILE (default: ask for a password)")
+    secret.add_argument("--password-file", metavar="FILE",
+                        help="read the password from the first line of FILE")
+    secret.add_argument("--password-fd", metavar="N", type=int,
+                        help="read the password from file descriptor N")
 
-            output_file = aes.decrypt_file(
-                args.decryptfile,
-                args.output,
-                decrypt_filename=args.decryptfilename,
-                backup=args.backup
-            )
+    p.add_argument("-o", "--output", metavar="PATH",
+                   help="output file or directory ('-' for stdout)")
+    p.add_argument("-r", "--recursive", action="store_true",
+                   help="process directories recursively")
+    p.add_argument("-f", "--force", action="store_true",
+                   help="overwrite existing files")
+    p.add_argument("--remove", action="store_true",
+                   help="delete each input file after it was processed successfully")
 
-            print("[+] File decrypted!")
-            print("[+] Output:", output_file)
 
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
+def build_parser():
+    parser = argparse.ArgumentParser(
+        prog=PROG,
+        description=(
+            f"Brachinus v{__version__}, Copyright (C) 2025 - 2026, Juan Bindez. "
+            "AES-256 file encryption."
+        ),
+    )
+    parser.add_argument("-V", "--version", action="version",
+                        version=f"%(prog)s {__version__}")
+    add_verbosity(parser, False)
 
-        return
+    sub = parser.add_subparsers(dest="cmd", metavar="COMMAND", required=True)
 
-    if args.keyinfo:
-        try:
-            if args.keyfile:
-                aes = AES256.load_from_keyfile(args.keyfile)
-            else:
-                password = getpass.getpass("[?] Enter password: ")
-                aes = AES256(password=password)
+    enc = sub.add_parser("encrypt", help="encrypt files (writes FILE.enc)")
+    add_common(enc)
+    enc.add_argument("-e", "--ext", action="append", metavar="EXT",
+                     help="in directories, only encrypt files with this extension")
+    enc.add_argument("--encrypt-names", action="store_true",
+                     help="also encrypt file and directory names")
 
-            print(wai_process_message())
+    dec = sub.add_parser("decrypt",
+                         help="decrypt .enc files (encrypted names are restored automatically)")
+    add_common(dec)
 
-            info = aes.get_key_info()
+    key = sub.add_parser("key", help="manage key files")
+    ksub = key.add_subparsers(dest="keycmd", metavar="SUBCOMMAND", required=True)
 
-            print("[+] Key info:")
-            print("[+] Key (hex):", info["key_hex"])
+    gen = ksub.add_parser("generate", help="create a new random key file (mode 0600)")
+    gen.add_argument("path", metavar="FILE", help="key file to create")
+    gen.add_argument("-f", "--force", action="store_true", help="overwrite an existing file")
 
-            if args.verbose:
-                print("[!] Salt:", info["salt"])
-                print("[!] Salt hex:", info["salt_hex"])
+    show = ksub.add_parser("show", help="show the fingerprint of a key file")
+    show.add_argument("path", metavar="FILE")
+    show.add_argument("--reveal", action="store_true", help="print the key itself, in hex")
 
-            print("[!] Type:", info["key_type"])
+    return parser, {"encrypt": enc, "decrypt": dec}
 
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
 
-        return
+def main(argv=None):
+    if hasattr(signal, "SIGPIPE"):
+        signal.signal(signal.SIGPIPE, signal.SIG_DFL)
 
-    if args.savekey:
-        try:
-            if args.keyfile:
-                with open(args.keyfile, "rb") as f:
-                    key = f.read()
+    parser, subparsers = build_parser()
+    args = parser.parse_args(argv)
+    log = Log(verbose=args.verbose, quiet=args.quiet)
 
-                aes = AES256(key=key)
-            else:
-                aes = AES256()
+    try:
+        if args.cmd == "key":
+            cmd_key(args, log)
+        else:
+            run_crypto(args, subparsers[args.cmd], log)
+    except KeyboardInterrupt:
+        return 130
+    except Exception as e:
+        log.fail(e)
 
-            print(wai_process_message())
-
-            aes.save_key(args.savekey)
-
-            print("[+] Key saved!")
-            print("[!] Key file:", args.savekey)
-
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
-
-        return
-
-    if args.loadkey:
-        try:
-            aes = AES256.load_from_keyfile(args.loadkey)
-
-            print(wai_process_message())
-
-            info = aes.get_key_info()
-
-            print("[+] Key loaded!")
-            print("[!] Key hex:", info["key_hex"])
-
-        except Exception as e:
-            print(f"[-] Error: {e}", file=sys.stderr)
-            sys.exit(1)
-
-        return
+    return 1 if log.failures else 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -3,13 +3,13 @@
 set -e
 
 VERSION=1
-MINOR=4
-PATCH=0
-EXTRAVERSION=""
-COMMIT="(#10)
-Assisted-by: ChatGPT:gpt-5.5
+MINOR=5
+PATCH=
+EXTRAVERSION="-rc1"
+COMMIT="()
+Assisted-by: Claude:Sonnet-5.5
 "
-BRANCH="main"
+BRANCH="cli"
 
 if [[ -z $PATCH ]]; then
     PATCH=""
