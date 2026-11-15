@@ -1,6 +1,6 @@
 <p align="center">
   <img
-    width="170"
+    width="150"
     alt="brachinus_logo"
     src="https://github.com/user-attachments/assets/b7946b12-886d-4ec1-9eb3-14502ffe4dc8"
   />

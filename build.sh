@@ -4,12 +4,10 @@ set -e
 
 VERSION=1
 MINOR=5
-PATCH=
-EXTRAVERSION="-rc1"
-COMMIT="()
-Assisted-by: Claude:Sonnet-5.5
-"
-BRANCH="cli"
+PATCH=0
+EXTRAVERSION=""
+COMMIT="(#11)"
+BRANCH="main"
 
 if [[ -z $PATCH ]]; then
     PATCH=""
