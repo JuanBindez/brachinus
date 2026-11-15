@@ -4,9 +4,9 @@ set -e
 
 VERSION=1
 MINOR=5
-PATCH=2
+PATCH=3
 EXTRAVERSION=""
-COMMIT="Updates Pypi Files(#11)"
+COMMIT="Fixes Pypi Files(#11)"
 BRANCH="main"
 
 if [[ -z $PATCH ]]; then

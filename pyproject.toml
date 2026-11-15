@@ -4,15 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brachinus"
-version = "1.5.2"
+version = "1.5.3"
 authors = [
   { name="Juan Bindez", email="juanbindez780@gmail.com" },
 ]
 description = "AES-256 CBC file encryption library with support for individual files and directory batch operations."
 readme = "README.md"
 requires-python = ">=3.7"
-license = "GPL-2.0-only"  #
-license-files = ["LICENSE"]   
+license = "GPL-2.0-only"  #  
 keywords = ["encryption", "crypto", "aes", "security", "files", "cryptography", "aes-256", "file-protection", "data-security",]
 classifiers = [
 	"Development Status :: 5 - Production/Stable",
