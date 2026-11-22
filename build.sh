@@ -6,7 +6,7 @@ VERSION=2
 MINOR=0
 PATCH=
 EXTRAVERSION="-rc1"
-COMMIT="initial 2.0 version"
+COMMIT="(#12)"
 BRANCH="dev"
 
 if [[ -z $PATCH ]]; then
