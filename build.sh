@@ -2,12 +2,12 @@
 
 set -e
 
-VERSION=1
-MINOR=5
-PATCH=4
-EXTRAVERSION=""
-COMMIT="Fixes Pypi Files(#11)"
-BRANCH="main"
+VERSION=2
+MINOR=0
+PATCH=
+EXTRAVERSION="-rc1"
+COMMIT="initial 2.0 version"
+BRANCH="dev"
 
 if [[ -z $PATCH ]]; then
     PATCH=""
