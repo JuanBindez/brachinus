@@ -49,6 +49,7 @@ NAME_MAX = 255  # bytes per path component on most filesystems
 # Errors and logging
 # --------------------------------------------------------------------------
 
+
 class CliError(Exception):
     def __init__(self, message, path=None):
         super().__init__(message)
@@ -97,6 +98,7 @@ class Log:
 # Cipher: key file or password -> AES256 (created lazily, once per run)
 # --------------------------------------------------------------------------
 
+
 def read_password(args, confirm):
     try:
         if args.password_file:
@@ -142,7 +144,9 @@ class Cipher:
 
         if args.key_file:
             if os.stat(args.key_file).st_mode & 0o077:
-                self._log.warn(f"{args.key_file}: key file is accessible by other users (chmod 600)")
+                self._log.warn(
+                    f"{args.key_file}: key file is accessible by other users (chmod 600)"
+                )
 
             with open(args.key_file, "rb") as f:
                 key = f.read()
@@ -171,8 +175,15 @@ class Names:
         if name not in self._cache:
             token = self._cipher.aes.encrypt_name(name)
 
-            if not isinstance(token, str) or not token or "/" in token or "\x00" in token:
-                raise CliError(f"cannot use the encrypted form of {name!r} as a file name")
+            if (
+                not isinstance(token, str)
+                or not token
+                or "/" in token
+                or "\x00" in token
+            ):
+                raise CliError(
+                    f"cannot use the encrypted form of {name!r} as a file name"
+                )
 
             self._cache[name] = token
 
@@ -185,7 +196,12 @@ class Names:
         except Exception:
             return token
 
-        if not isinstance(name, str) or name in ("", ".", "..") or "/" in name or "\x00" in name:
+        if (
+            not isinstance(name, str)
+            or name in ("", ".", "..")
+            or "/" in name
+            or "\x00" in name
+        ):
             return token
 
         return name
@@ -194,6 +210,7 @@ class Names:
 # --------------------------------------------------------------------------
 # Doing the work: one file, one output, atomically
 # --------------------------------------------------------------------------
+
 
 def current_umask():
     mask = os.umask(0)
@@ -251,7 +268,9 @@ def process(encrypting, aes, src, dest, force):
             # DecryptionError / FormatError / InvalidKeyError: the message is already clear
             raise CliError(str(e))
         except Exception as e:
-            raise CliError(f"{'encryption' if encrypting else 'decryption'} failed: {e}")
+            raise CliError(
+                f"{'encryption' if encrypting else 'decryption'} failed: {e}"
+            )
 
         result = out_path
 
@@ -294,6 +313,7 @@ def prune_empty_dirs(removed, tops):
 # --------------------------------------------------------------------------
 # Planning: which file goes where
 # --------------------------------------------------------------------------
+
 
 def output_is_dir(args):
     out = args.output
@@ -365,7 +385,9 @@ def plan_encrypt(args, names, log):
                     dest = out
                 else:
                     outname = enc_component(names, os.path.basename(arg), args, SUFFIX)
-                    dest = os.path.join(out if into_dir else os.path.dirname(arg), outname)
+                    dest = os.path.join(
+                        out if into_dir else os.path.dirname(arg), outname
+                    )
             except CliError as e:
                 log.error(f"{arg}: {e.message}")
                 continue
@@ -409,9 +431,11 @@ def plan_encrypt(args, names, log):
             rel = os.path.relpath(root, base)
 
             try:
-                parts = [] if rel == "." else [
-                    enc_component(names, p, args) for p in rel.split(os.sep)
-                ]
+                parts = (
+                    []
+                    if rel == "."
+                    else [enc_component(names, p, args) for p in rel.split(os.sep)]
+                )
             except CliError as e:
                 log.error(f"{root}: {e.message}")
                 dirs[:] = []
@@ -520,8 +544,10 @@ def plan_decrypt(args, names, log):
             for f in sorted(files):
                 if f.endswith(SUFFIX) and f != SUFFIX:
                     jobs.append(
-                        (os.path.join(root, f),
-                         os.path.join(outdir, names.decrypt(f[: -len(SUFFIX)])))
+                        (
+                            os.path.join(root, f),
+                            os.path.join(outdir, names.decrypt(f[: -len(SUFFIX)])),
+                        )
                     )
                     count += 1
 
@@ -534,6 +560,7 @@ def plan_decrypt(args, names, log):
 # --------------------------------------------------------------------------
 # Commands
 # --------------------------------------------------------------------------
+
 
 def run_crypto(args, parser, log):
     encrypting = args.cmd == "encrypt"
@@ -548,7 +575,9 @@ def run_crypto(args, parser, log):
         parser.error("'-' (stdin) cannot be combined with other files")
 
     if args.output == "-":
-        if len(args.files) != 1 or (args.files[0] != "-" and os.path.isdir(args.files[0])):
+        if len(args.files) != 1 or (
+            args.files[0] != "-" and os.path.isdir(args.files[0])
+        ):
             parser.error("'-o -' needs exactly one input file")
 
         if args.remove:
@@ -556,7 +585,8 @@ def run_crypto(args, parser, log):
 
     if encrypting:
         args.ext = [
-            e.lower() if e.startswith(".") else "." + e.lower() for e in (args.ext or [])
+            e.lower() if e.startswith(".") else "." + e.lower()
+            for e in (args.ext or [])
         ]
 
     cipher = Cipher(args, confirm=encrypting, log=log)
@@ -564,7 +594,9 @@ def run_crypto(args, parser, log):
     jobs, tops = (plan_encrypt if encrypting else plan_decrypt)(args, names, log)
 
     if encrypting and sys.stdout.isatty() and any(dest == "-" for _, dest in jobs):
-        raise Fatal("refusing to write encrypted data to a terminal (use -o FILE or redirect)")
+        raise Fatal(
+            "refusing to write encrypted data to a terminal (use -o FILE or redirect)"
+        )
 
     if jobs:
         cipher.aes  # asks for the password once, before any work starts
@@ -646,35 +678,73 @@ def cmd_key(args, log):
 # Argument parsing
 # --------------------------------------------------------------------------
 
+
 def add_verbosity(p, default):
-    p.add_argument("-v", "--verbose", action="store_true", default=default,
-                   help="print one line per file on stderr")
-    p.add_argument("-q", "--quiet", action="store_true", default=default,
-                   help="suppress warnings and progress")
+    p.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        default=default,
+        help="print one line per file on stderr",
+    )
+    p.add_argument(
+        "-q",
+        "--quiet",
+        action="store_true",
+        default=default,
+        help="suppress warnings and progress",
+    )
 
 
 def add_common(p):
     add_verbosity(p, argparse.SUPPRESS)
 
-    p.add_argument("files", nargs="*", metavar="FILE",
-                   help="files or directories ('-' or none: stdin)")
+    p.add_argument(
+        "files",
+        nargs="*",
+        metavar="FILE",
+        help="files or directories ('-' or none: stdin)",
+    )
 
     secret = p.add_mutually_exclusive_group()
-    secret.add_argument("-k", "--key-file", metavar="FILE",
-                        help="use the binary key in FILE (default: ask for a password)")
-    secret.add_argument("--password-file", metavar="FILE",
-                        help="read the password from the first line of FILE")
-    secret.add_argument("--password-fd", metavar="N", type=int,
-                        help="read the password from file descriptor N")
+    secret.add_argument(
+        "-k",
+        "--key-file",
+        metavar="FILE",
+        help="use the binary key in FILE (default: ask for a password)",
+    )
+    secret.add_argument(
+        "--password-file",
+        metavar="FILE",
+        help="read the password from the first line of FILE",
+    )
+    secret.add_argument(
+        "--password-fd",
+        metavar="N",
+        type=int,
+        help="read the password from file descriptor N",
+    )
 
-    p.add_argument("-o", "--output", metavar="PATH",
-                   help="output file or directory ('-' for stdout)")
-    p.add_argument("-r", "--recursive", action="store_true",
-                   help="process directories recursively (in place; only file names get .enc)")
-    p.add_argument("-f", "--force", action="store_true",
-                   help="overwrite existing files")
-    p.add_argument("--remove", action="store_true",
-                   help="delete each input file after its output was written successfully")
+    p.add_argument(
+        "-o",
+        "--output",
+        metavar="PATH",
+        help="output file or directory ('-' for stdout)",
+    )
+    p.add_argument(
+        "-r",
+        "--recursive",
+        action="store_true",
+        help="process directories recursively (in place; only file names get .enc)",
+    )
+    p.add_argument(
+        "-f", "--force", action="store_true", help="overwrite existing files"
+    )
+    p.add_argument(
+        "--remove",
+        action="store_true",
+        help="delete each input file after its output was written successfully",
+    )
 
 
 def build_parser():
@@ -685,21 +755,32 @@ def build_parser():
             "AES-256 file encryption."
         ),
     )
-    parser.add_argument("-V", "--version", action="version",
-                        version=f"%(prog)s {__version__}")
+    parser.add_argument(
+        "-V", "--version", action="version", version=f"%(prog)s {__version__}"
+    )
     add_verbosity(parser, False)
 
     sub = parser.add_subparsers(dest="cmd", metavar="COMMAND", required=True)
 
     enc = sub.add_parser("encrypt", help="encrypt files (writes FILE.enc)")
     add_common(enc)
-    enc.add_argument("-e", "--ext", action="append", metavar="EXT",
-                     help="in directories, only encrypt files with this extension")
-    enc.add_argument("--encrypt-names", action="store_true",
-                     help="also encrypt file and directory names")
+    enc.add_argument(
+        "-e",
+        "--ext",
+        action="append",
+        metavar="EXT",
+        help="in directories, only encrypt files with this extension",
+    )
+    enc.add_argument(
+        "--encrypt-names",
+        action="store_true",
+        help="also encrypt file and directory names",
+    )
 
-    dec = sub.add_parser("decrypt",
-                         help="decrypt .enc files (encrypted names are restored automatically)")
+    dec = sub.add_parser(
+        "decrypt",
+        help="decrypt .enc files (encrypted names are restored automatically)",
+    )
     add_common(dec)
 
     key = sub.add_parser("key", help="manage key files")
@@ -707,11 +788,15 @@ def build_parser():
 
     gen = ksub.add_parser("generate", help="create a new random key file (mode 0600)")
     gen.add_argument("path", metavar="FILE", help="key file to create")
-    gen.add_argument("-f", "--force", action="store_true", help="overwrite an existing file")
+    gen.add_argument(
+        "-f", "--force", action="store_true", help="overwrite an existing file"
+    )
 
     show = ksub.add_parser("show", help="show the fingerprint of a key file")
     show.add_argument("path", metavar="FILE")
-    show.add_argument("--reveal", action="store_true", help="print the key itself, in hex")
+    show.add_argument(
+        "--reveal", action="store_true", help="print the key itself, in hex"
+    )
 
     return parser, {"encrypt": enc, "decrypt": dec}
 

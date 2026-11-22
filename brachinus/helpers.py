@@ -1,25 +1,9 @@
-
 import base64
 import contextlib
 import os
 import tempfile
-import warnings
 
-from brachinus.exceptions import *
-
-
-def _resolve_remove(remove_original, backup):
-    """`backup` is the old, deprecated spelling: backup=True keeps the original."""
-    if backup is None:
-        return bool(remove_original)
-
-    warnings.warn(
-        "'backup' is deprecated; use remove_original (backup=True means "
-        "remove_original=False)",
-        DeprecationWarning,
-        stacklevel=3,
-    )
-    return not backup
+from brachinus.exceptions import DecryptionError, FormatError
 
 
 def _check_name(name):

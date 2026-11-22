@@ -1,5 +1,3 @@
-
-
 """
 Copyright © 2025–2026 JuanBindez <juanbindez780@gmail.com>
 
@@ -46,7 +44,6 @@ import hmac
 import os
 import stat
 import struct
-import base64
 
 from Crypto.Cipher import AES
 from Crypto.Hash import SHA256
@@ -54,15 +51,18 @@ from Crypto.Protocol.KDF import PBKDF2
 from Crypto.Random import get_random_bytes
 from Crypto.Util.Padding import unpad
 
-from brachinus.exceptions import *
-from brachinus.helpers import(_b64d, 
-                    _b64e,
-                    _check_name,
-                    _resolve_remove,
-                    _atomic_write,
-                    _default_mode,
-                    _prune_empty_dirs
-                    )
+from brachinus.exceptions import (
+    BrachinusError, DecryptionError, FormatError, InvalidKeyError,
+)
+
+from brachinus.helpers import (
+    _b64d,
+    _b64e,
+    _check_name,
+    _atomic_write,
+    _default_mode,
+    _prune_empty_dirs,
+)
 
 MAGIC = b"BRCH"
 VERSION = 2
@@ -70,8 +70,8 @@ KDF_RAW = 0
 KDF_PBKDF2_SHA256 = 1
 
 DEFAULT_ITERATIONS = 600_000
-MAX_ITERATIONS = 20_000_000       # refuse hostile headers asking for absurd work
-DEFAULT_CHUNK_LOG2 = 20           # 1 MiB chunks
+MAX_ITERATIONS = 20_000_000  # refuse hostile headers asking for absurd work
+DEFAULT_CHUNK_LOG2 = 20  # 1 MiB chunks
 MIN_CHUNK_LOG2 = 10
 MAX_CHUNK_LOG2 = 26
 
@@ -81,7 +81,7 @@ TAG_LEN = 16
 NAME_NONCE_LEN = 12
 SUFFIX = ".enc"
 
-_HEAD = struct.Struct(">BBIB")    # version, kdf, iterations, chunk_log2
+_HEAD = struct.Struct(">BBIB")  # version, kdf, iterations, chunk_log2
 _LEGACY_ITERATIONS = 100_000
 _LEGACY_SALT_PREFIX = (16).to_bytes(4, "big")
 
@@ -94,8 +94,14 @@ _NAME_KEY_PWD = 0x02
 class AES256:
     """AES-256 file and name encryption with a random key or a password."""
 
-    def __init__(self, key=None, password=None, salt=None,
-                 iterations=DEFAULT_ITERATIONS, chunk_log2=DEFAULT_CHUNK_LOG2):
+    def __init__(
+        self,
+        key=None,
+        password=None,
+        salt=None,
+        iterations=DEFAULT_ITERATIONS,
+        chunk_log2=DEFAULT_CHUNK_LOG2,
+    ):
         if key is not None and password is not None:
             raise InvalidKeyError("give either a key or a password, not both")
 
@@ -112,7 +118,11 @@ class AES256:
         self._cache = {}
 
         if password is not None:
-            pw = password.encode("utf-8") if isinstance(password, str) else bytes(password)
+            pw = (
+                password.encode("utf-8")
+                if isinstance(password, str)
+                else bytes(password)
+            )
 
             if not pw:
                 raise InvalidKeyError("empty password")
@@ -144,11 +154,12 @@ class AES256:
             if len(self._cache) >= 64:
                 self._cache.clear()
 
-            if legacy:   # version 1: PBKDF2-HMAC-SHA1
+            if legacy:  # version 1: PBKDF2-HMAC-SHA1
                 key = PBKDF2(self._pw, salt, dkLen=32, count=iterations)
             else:
-                key = PBKDF2(self._pw, salt, dkLen=32, count=iterations,
-                             hmac_hash_module=SHA256)
+                key = PBKDF2(
+                    self._pw, salt, dkLen=32, count=iterations, hmac_hash_module=SHA256
+                )
 
             self._cache[ck] = key
 
@@ -192,7 +203,9 @@ class AES256:
     def encrypt_name(self, name):
         """Authenticated, URL-safe token for a file or directory name."""
         if self.password is not None:
-            tag = bytes([_NAME_KEY_PWD]) + self.iterations.to_bytes(4, "big") + self.salt
+            tag = (
+                bytes([_NAME_KEY_PWD]) + self.iterations.to_bytes(4, "big") + self.salt
+            )
         else:
             tag = bytes([_NAME_KEY_RAW])
 
@@ -211,7 +224,9 @@ class AES256:
             name = self._decrypt_name_legacy(data)
 
         if name is None:
-            raise DecryptionError("cannot decrypt name: wrong password/key or not an encrypted name")
+            raise DecryptionError(
+                "cannot decrypt name: wrong password/key or not an encrypted name"
+            )
 
         return _check_name(name)
 
@@ -228,20 +243,22 @@ class AES256:
                     return None
 
                 tag_len = 1 + 4 + SALT_LEN
-                master = self._derive(data[5:5 + SALT_LEN], iterations)
+                master = self._derive(data[5 : 5 + SALT_LEN], iterations)
             else:
                 return None
 
             tag = data[:tag_len]
-            nonce = data[tag_len:tag_len + NAME_NONCE_LEN]
-            body = data[tag_len + NAME_NONCE_LEN:]
+            nonce = data[tag_len : tag_len + NAME_NONCE_LEN]
+            body = data[tag_len + NAME_NONCE_LEN :]
 
             if len(nonce) != NAME_NONCE_LEN or len(body) < TAG_LEN:
                 return None
 
             cipher = AES.new(self._name_key(master), AES.MODE_GCM, nonce=nonce)
             cipher.update(_NAME_AAD + tag)
-            return cipher.decrypt_and_verify(body[:-TAG_LEN], body[-TAG_LEN:]).decode("utf-8")
+            return cipher.decrypt_and_verify(body[:-TAG_LEN], body[-TAG_LEN:]).decode(
+                "utf-8"
+            )
         except (ValueError, IndexError):
             return None
 
@@ -251,7 +268,9 @@ class AES256:
 
         try:
             key = self._derive(data[:16], _LEGACY_ITERATIONS, legacy=True)
-            plain = unpad(AES.new(key, AES.MODE_CBC, data[16:32]).decrypt(data[32:]), 16)
+            plain = unpad(
+                AES.new(key, AES.MODE_CBC, data[16:32]).decrypt(data[32:]), 16
+            )
             return plain.decode("utf-8")
         except ValueError:
             return None
@@ -265,7 +284,12 @@ class AES256:
             kdf, salt, iterations = KDF_RAW, b"", 0
 
         prefix = get_random_bytes(PREFIX_LEN)
-        header = MAGIC + _HEAD.pack(VERSION, kdf, iterations, self.chunk_log2) + salt + prefix
+        header = (
+            MAGIC
+            + _HEAD.pack(VERSION, kdf, iterations, self.chunk_log2)
+            + salt
+            + prefix
+        )
         fout.write(header)
 
         size = 1 << self.chunk_log2
@@ -279,7 +303,9 @@ class AES256:
             if index >= 1 << 32:
                 raise BrachinusError("file too large for this format")
 
-            cipher = AES.new(self.key, AES.MODE_GCM, nonce=prefix + index.to_bytes(4, "big"))
+            cipher = AES.new(
+                self.key, AES.MODE_GCM, nonce=prefix + index.to_bytes(4, "big")
+            )
             cipher.update(header + (b"\x01" if final else b"\x00"))
             ct, mac = cipher.encrypt_and_digest(cur)
             fout.write(ct + mac)
@@ -293,7 +319,7 @@ class AES256:
         head = fin.read(len(MAGIC) + _HEAD.size)
 
         if len(head) < len(MAGIC) + _HEAD.size or head[:4] != MAGIC:
-            raise FormatError(f"not a brachinus file")
+            raise FormatError("not a brachinus file")
 
         version, kdf, iterations, chunk_log2 = _HEAD.unpack(head[4:])
 
@@ -301,25 +327,29 @@ class AES256:
             raise FormatError(f"unsupported format version {version}")
 
         if not MIN_CHUNK_LOG2 <= chunk_log2 <= MAX_CHUNK_LOG2:
-            raise FormatError(f"invalid chunk size")
+            raise FormatError("invalid chunk size")
 
         if kdf == KDF_PBKDF2_SHA256:
             if self.password is None:
-                raise DecryptionError(f"encrypted with a password, but a key file was given")
+                raise DecryptionError(
+                    "encrypted with a password, but a key file was given"
+                )
 
             if not 1 <= iterations <= MAX_ITERATIONS:
-                raise FormatError(f"invalid KDF parameters")
+                raise FormatError("invalid KDF parameters")
 
             salt = fin.read(SALT_LEN)
 
             if len(salt) != SALT_LEN:
-                raise FormatError(f"truncated header")
+                raise FormatError("truncated header")
 
             head += salt
             key = self._derive(salt, iterations)
         elif kdf == KDF_RAW:
             if self.password is not None:
-                raise DecryptionError(f"encrypted with a key file, but a password was given")
+                raise DecryptionError(
+                    "encrypted with a key file, but a password was given"
+                )
 
             key = self.key
         else:
@@ -328,7 +358,7 @@ class AES256:
         prefix = fin.read(PREFIX_LEN)
 
         if len(prefix) != PREFIX_LEN:
-            raise FormatError(f"truncated header")
+            raise FormatError("truncated header")
 
         header = head + prefix
         record = (1 << chunk_log2) + TAG_LEN
@@ -340,7 +370,7 @@ class AES256:
             final = not nxt
 
             if len(cur) < TAG_LEN:
-                raise FormatError(f"truncated file")
+                raise FormatError("truncated file")
 
             cipher = AES.new(key, AES.MODE_GCM, nonce=prefix + index.to_bytes(4, "big"))
             cipher.update(header + (b"\x01" if final else b"\x00"))
@@ -349,7 +379,7 @@ class AES256:
                 fout.write(cipher.decrypt_and_verify(cur[:-TAG_LEN], cur[-TAG_LEN:]))
             except ValueError:
                 raise DecryptionError(
-                    f"authentication failed (wrong password/key, or the file was modified or truncated)"
+                    "authentication failed (wrong password/key, or the file was modified or truncated)"
                 ) from None
 
             if final:
@@ -359,37 +389,45 @@ class AES256:
 
     def _decrypt_legacy(self, data, fout, path):
         """Version 1: CBC, [4-byte salt length + salt]? + IV + data."""
-        if self.password is not None and data[:4] == _LEGACY_SALT_PREFIX and len(data) >= 36:
+        if (
+            self.password is not None
+            and data[:4] == _LEGACY_SALT_PREFIX
+            and len(data) >= 36
+        ):
             key = self._derive(data[4:20], _LEGACY_ITERATIONS, legacy=True)
             iv, body = data[20:36], data[36:]
         else:
             key, iv, body = self.key, data[:16], data[16:]
 
         if len(iv) != 16 or not body or len(body) % 16:
-            raise FormatError(f"not a brachinus file")
+            raise FormatError("not a brachinus file")
 
         try:
             fout.write(unpad(AES.new(key, AES.MODE_CBC, iv).decrypt(body), 16))
         except ValueError:
-            raise DecryptionError(f"wrong password/key or corrupted file") from None
+            raise DecryptionError("wrong password/key or corrupted file") from None
 
     # -- single files -------------------------------------------------------
 
-    def encrypt_file(self, file_path, output_path=None, encrypt_filename=False,
-                     remove_original=False, backup=None):
+    def encrypt_file(
+        self, file_path, output_path=None, encrypt_filename=False, remove_original=False
+    ):
         """Encrypt one file; returns the output path.
 
         The original is kept unless remove_original=True. The output is
         written atomically.
         """
-        remove_original = _resolve_remove(remove_original, backup)
         file_path = os.fspath(file_path)
 
         if not os.path.isfile(file_path):
             raise FileNotFoundError(f"File not found: {file_path}")
 
         if encrypt_filename:
-            directory = os.path.dirname(output_path) if output_path else os.path.dirname(file_path)
+            directory = (
+                os.path.dirname(output_path)
+                if output_path
+                else os.path.dirname(file_path)
+            )
             output_path = os.path.join(
                 directory, self.encrypt_name(os.path.basename(file_path)) + SUFFIX
             )
@@ -411,13 +449,13 @@ class AES256:
 
         return output_path
 
-    def decrypt_file(self, file_path, output_path=None, decrypt_filename=False,
-                     remove_original=False, backup=None):
+    def decrypt_file(
+        self, file_path, output_path=None, decrypt_filename=False, remove_original=False
+    ):
         """Decrypt one file; returns the output path. Reads version 1 files too.
 
         remove_original=True deletes the encrypted file after success.
         """
-        remove_original = _resolve_remove(remove_original, backup)
         file_path = os.fspath(file_path)
 
         if not os.path.isfile(file_path):
@@ -425,12 +463,18 @@ class AES256:
 
         if decrypt_filename:
             base = os.path.basename(file_path)
-            token = base[:-len(SUFFIX)] if base.endswith(SUFFIX) else base
-            directory = os.path.dirname(output_path) if output_path else os.path.dirname(file_path)
+            token = base[: -len(SUFFIX)] if base.endswith(SUFFIX) else base
+            directory = (
+                os.path.dirname(output_path)
+                if output_path
+                else os.path.dirname(file_path)
+            )
             output_path = os.path.join(directory, self.decrypt_name(token))
         elif output_path is None:
             output_path = (
-                file_path[:-len(SUFFIX)] if file_path.endswith(SUFFIX) else file_path + ".dec"
+                file_path[: -len(SUFFIX)]
+                if file_path.endswith(SUFFIX)
+                else file_path + ".dec"
             )
 
         output_path = os.fspath(output_path)
@@ -455,16 +499,22 @@ class AES256:
 
     # -- directories --------------------------------------------------------
 
-    def encrypt_directory(self, directory_path, output_dir=None, extensions=None,
-                          encrypt_filenames=False, encrypt_dirnames=False,
-                          recursive=False, remove_original=False, backup=None):
+    def encrypt_directory(
+        self,
+        directory_path,
+        output_dir=None,
+        extensions=None,
+        encrypt_filenames=False,
+        encrypt_dirnames=False,
+        recursive=False,
+        remove_original=False,
+    ):
         """Encrypt the files of a directory; returns the list of outputs.
 
         Default output: the directory itself (files get ".enc" next to the
         originals), or, with encrypt_dirnames, a sibling directory with an
         encrypted name.
         """
-        remove_original = _resolve_remove(remove_original, backup)
         root = os.path.normpath(os.fspath(directory_path))
 
         if not os.path.isdir(root):
@@ -472,7 +522,8 @@ class AES256:
 
         exts = (
             {e.lower() if e.startswith(".") else "." + e.lower() for e in extensions}
-            if extensions else None
+            if extensions
+            else None
         )
         tokens = {}
 
@@ -485,7 +536,9 @@ class AES256:
         if output_dir is None:
             if encrypt_dirnames:
                 top = os.path.basename(os.path.abspath(root))
-                output_dir = os.path.join(os.path.dirname(os.path.abspath(root)), token(top))
+                output_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(root)), token(top)
+                )
             else:
                 output_dir = root
 
@@ -497,7 +550,8 @@ class AES256:
         for cur, dirs, files in os.walk(root):
             if recursive:
                 dirs[:] = sorted(
-                    d for d in dirs
+                    d
+                    for d in dirs
                     if not os.path.islink(os.path.join(cur, d))
                     and os.path.abspath(os.path.join(cur, d)) != skip
                 )
@@ -505,9 +559,11 @@ class AES256:
                 dirs[:] = []
 
             rel = os.path.relpath(cur, root)
-            parts = [] if rel == "." else [
-                token(p) if encrypt_dirnames else p for p in rel.split(os.sep)
-            ]
+            parts = (
+                []
+                if rel == "."
+                else [token(p) if encrypt_dirnames else p for p in rel.split(os.sep)]
+            )
             outdir = os.path.join(output_dir, *parts)
 
             for f in sorted(files):
@@ -520,20 +576,29 @@ class AES256:
                     continue
 
                 outname = (token(f) if encrypt_filenames else f) + SUFFIX
-                results.append(self.encrypt_file(
-                    src, os.path.join(outdir, outname), remove_original=remove_original
-                ))
+                results.append(
+                    self.encrypt_file(
+                        src,
+                        os.path.join(outdir, outname),
+                        remove_original=remove_original,
+                    )
+                )
 
         if remove_original and not in_place:
             _prune_empty_dirs(root)
 
         return results
 
-    def decrypt_directory(self, directory_path, output_dir=None,
-                          decrypt_filenames=False, decrypt_dirnames=False,
-                          recursive=False, remove_original=False, backup=None):
+    def decrypt_directory(
+        self,
+        directory_path,
+        output_dir=None,
+        decrypt_filenames=False,
+        decrypt_dirnames=False,
+        recursive=False,
+        remove_original=False,
+    ):
         """Decrypt the ".enc" files of a directory; returns the list of outputs."""
-        remove_original = _resolve_remove(remove_original, backup)
         root = os.path.normpath(os.fspath(directory_path))
 
         if not os.path.isdir(root):
@@ -542,9 +607,14 @@ class AES256:
         if output_dir is None:
             if decrypt_dirnames:
                 top = os.path.basename(os.path.abspath(root))
-                top = top[:-len(SUFFIX)] if top.endswith(SUFFIX) and top != SUFFIX else top
-                output_dir = os.path.join(os.path.dirname(os.path.abspath(root)),
-                                          self.decrypt_name(top))
+                top = (
+                    top[: -len(SUFFIX)]
+                    if top.endswith(SUFFIX) and top != SUFFIX
+                    else top
+                )
+                output_dir = os.path.join(
+                    os.path.dirname(os.path.abspath(root)), self.decrypt_name(top)
+                )
             else:
                 output_dir = root
 
@@ -556,7 +626,8 @@ class AES256:
         for cur, dirs, files in os.walk(root):
             if recursive:
                 dirs[:] = sorted(
-                    d for d in dirs
+                    d
+                    for d in dirs
                     if not os.path.islink(os.path.join(cur, d))
                     and os.path.abspath(os.path.join(cur, d)) != skip
                 )
@@ -564,22 +635,36 @@ class AES256:
                 dirs[:] = []
 
             rel = os.path.relpath(cur, root)
-            parts = [] if rel == "." else [
-                self.decrypt_name(p) if decrypt_dirnames else p for p in rel.split(os.sep)
-            ]
+            parts = (
+                []
+                if rel == "."
+                else [
+                    self.decrypt_name(p) if decrypt_dirnames else p
+                    for p in rel.split(os.sep)
+                ]
+            )
             outdir = os.path.join(output_dir, *parts)
 
             for f in sorted(files):
                 src = os.path.join(cur, f)
 
-                if not f.endswith(SUFFIX) or f == SUFFIX or os.path.islink(src) or not os.path.isfile(src):
+                if (
+                    not f.endswith(SUFFIX)
+                    or f == SUFFIX
+                    or os.path.islink(src)
+                    or not os.path.isfile(src)
+                ):
                     continue
 
-                stem = f[:-len(SUFFIX)]
+                stem = f[: -len(SUFFIX)]
                 outname = self.decrypt_name(stem) if decrypt_filenames else stem
-                results.append(self.decrypt_file(
-                    src, os.path.join(outdir, outname), remove_original=remove_original
-                ))
+                results.append(
+                    self.decrypt_file(
+                        src,
+                        os.path.join(outdir, outname),
+                        remove_original=remove_original,
+                    )
+                )
 
         if remove_original and not in_place:
             _prune_empty_dirs(root)
@@ -587,18 +672,23 @@ class AES256:
         return results
 
 
-
-def encrypt_file_with_password(file_path, password, output_path=None,
-                               encrypt_filename=False, remove_original=False, backup=None):
+def encrypt_file_with_password(
+    file_path, password, output_path=None, encrypt_filename=False, remove_original=False
+):
     return AES256(password=password).encrypt_file(
-        file_path, output_path, encrypt_filename=encrypt_filename,
-        remove_original=remove_original, backup=backup,
+        file_path,
+        output_path,
+        encrypt_filename=encrypt_filename,
+        remove_original=remove_original,
     )
 
 
-def decrypt_file_with_password(file_path, password, output_path=None,
-                               decrypt_filename=False, remove_original=False, backup=None):
+def decrypt_file_with_password(
+    file_path, password, output_path=None, decrypt_filename=False, remove_original=False
+):
     return AES256(password=password).decrypt_file(
-        file_path, output_path, decrypt_filename=decrypt_filename,
-        remove_original=remove_original, backup=backup,
+        file_path,
+        output_path,
+        decrypt_filename=decrypt_filename,
+        remove_original=remove_original,
     )
