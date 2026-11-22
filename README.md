@@ -1,11 +1,3 @@
-<p align="center">
-  <img
-    width="150"
-    alt="brachinus_logo"
-    src="https://github.com/user-attachments/assets/b7946b12-886d-4ec1-9eb3-14502ffe4dc8"
-  />
-</p>
-
 <h1 align="center">brachinus</h1>
 
 <p align="center">
@@ -16,39 +8,36 @@
 </p>
 
 <h2 align="center">
-  AES-256 CBC file encryption library for Python with support for individual files and directory batch operations.
+  Authenticated AES-256-GCM file encryption for Python, with a Unix-style command-line tool.
 </h2>
 
-### Supports single-file and directory batch operations + a Unix-style command-line tool
+### Single files, whole directories, encrypted file names, pipes
 
-Brachinus is a simple, secure, and feature-rich AES-256 encryption library for Python.  
-It supports password-based key derivation, random binary keys, file/directory encryption, and includes a built-in CLI that follows Unix conventions.
+Brachinus is a small, safe-by-default encryption library for Python. It supports password-based keys, random binary keys, file and directory encryption, optional encryption of file and directory names, and includes a CLI that follows Unix conventions.
 
 ---
 
 ## Features
 
-- AES-256 encryption (CBC mode)
-- PBKDF2 key derivation (100k iterations)
-- Automatic IV generation
-- Salt + IV metadata stored in output file
-- File and directory encryption/decryption
-- Optional extension filtering
-- Filename encryption/decryption
-- Directory name encryption/decryption
-- In-place or backup mode operations (Python API)
+- AES-256-GCM, authenticated: a wrong password or a modified file is always detected
+- Streaming, chunked encryption: files of any size, constant memory
+- PBKDF2-HMAC-SHA256 key derivation (600,000 iterations, stored in the file header)
+- Versioned file format; truncation and reordering of data are detected
+- Atomic writes: a failure never leaves a half-written file
+- Originals are kept unless you ask to remove them
+- File and directory encryption/decryption, with extension filtering
+- File name and directory name encryption (authenticated, path-traversal safe)
 - Key saving/loading utilities
-- Unix-style command-line interface (CLI): silent on success, pipes, exit codes, per-file errors
+- Reads files written by brachinus 1.x (AES-CBC)
+- Unix-style command-line interface: silent on success, pipes, exit codes, per-file errors
 
 ---
 
 ## Installation
 
-Install:
-
     pip install brachinus
 
-Or install from source:
+Or from source:
 
     git clone https://github.com/JuanBindez/brachinus
     cd brachinus
@@ -58,155 +47,139 @@ Or install from source:
 
 ## Quick Start (Python API)
 
-## Using the AES256 Class Directly
-
 ### With a password
 
 ```python
 from brachinus import AES256
 
-PASS_WORD = "password123"
+crypt = AES256(password="password123")
 
-crypt = AES256(password=PASS_WORD)
-crypt.encrypt_file(
-    file_path="file.txt",
-    encrypt_filename=True
-)
-
-crypt.decrypt_file("file.txt.enc")
+enc = crypt.encrypt_file("file.txt")        # writes file.txt.enc, keeps file.txt
+crypt.decrypt_file(enc, "restored.txt")
 ```
+
 ### With a random binary key
 
 ```python
 aes = AES256()
-print(aes.key)
-```
-### Key save/load
+aes.save_key("aes.key")                     # file mode 0600
 
-```python
-aes.save_key("aes.key")
 loaded = AES256.load_from_keyfile("aes.key")
 ```
+
+### Encrypted file names
+
+```python
+enc = crypt.encrypt_file("secret plans.txt", encrypt_filename=True)
+# enc is something like "5pJm....enc"; the original name is inside it
+
+crypt.decrypt_file(enc, decrypt_filename=True)   # restores "secret plans.txt"
+```
+
+### Removing the original
+
+By default the original file is **kept**. Pass `remove_original=True` to delete it after the output was written successfully:
+
+```python
+crypt.encrypt_file("file.txt", remove_original=True)
+crypt.decrypt_file("file.txt.enc", remove_original=True)   # deletes the .enc
+```
+
+> `backup=` from earlier versions is deprecated and still accepted: `backup=True` means `remove_original=False`, and `backup=False` means `remove_original=True`.
+
+### Key information
+
+```python
+aes.get_key_info()
+# {"key": b"...", "key_hex": "a4f5...", "key_type": "random"}
+
+crypt.get_key_info()
+# {"key": ..., "key_hex": ..., "key_type": "password-derived",
+#  "salt": ..., "salt_hex": ..., "iterations": 600000}
+```
+
+Password-derived keys cannot be saved with `save_key()`; keep the password instead.
+
+### Errors
+
+All errors derive from `BrachinusError` (and also from `ValueError`):
+
+| Exception | Meaning |
+|-----------|---------|
+| `InvalidKeyError` | bad key size, empty password, bad salt |
+| `FormatError` | not a brachinus file, or structurally damaged |
+| `DecryptionError` | wrong password/key, or the data was modified or truncated |
+
+```python
+from brachinus import AES256, DecryptionError
+
+try:
+    AES256(password="wrong").decrypt_file("file.txt.enc")
+except DecryptionError as e:
+    print(e)
+```
+
 ---
 
-## Directory Encryption
+## Directories
 
-### Basic directory encryption (in-place)
-
-```python
-All files are encrypted in the same directory, original files are removed.
-```
-
-### Backup mode (creates new directory)
+`encrypt_directory()` and `decrypt_directory()` return the list of files they wrote. Directories are processed **in place** by default: each file gets its `.enc` next to the original, and directories are never renamed with `.enc`. Symbolic links are skipped, and files already ending in `.enc` are not encrypted again.
 
 ```python
-aes.encrypt_directory("myfolder", backup=True)
+aes.encrypt_directory("myfolder", recursive=True)                       # keep originals
+aes.encrypt_directory("myfolder", recursive=True, remove_original=True)
+aes.encrypt_directory("myfolder", recursive=True, output_dir="vault")   # write elsewhere
+aes.encrypt_directory("photos", recursive=True, extensions=[".jpg", ".png"])
 ```
-Produces:
 
-    myfolder_encrypted/
-
-### Encrypt filenames
-
-```python
-aes.encrypt_directory("myfolder", encrypt_filenames=True, backup=False)
-```
-### Encrypt directory names
-
-```python
-aes.encrypt_directory("myfolder", encrypt_dirnames=True, recursive=True, backup=False)
-```
-### Encrypt only specific extensions
-
-```python
-aes.encrypt_directory("photos", extensions=[".jpg", ".png"], backup=False)
-```
-### Complete example with all options
+Encrypted names (a new sibling directory with an encrypted name is created, so use `remove_original=True` to replace the tree):
 
 ```python
 aes.encrypt_directory(
-    directory_path="myfolder",
-    extensions=[".txt", ".pdf"],
+    "myfolder",
+    recursive=True,
     encrypt_filenames=True,
     encrypt_dirnames=True,
-    recursive=True,
-    backup=False
+    remove_original=True,
 )
 ```
----
 
-## Directory Decryption
-
-### Basic directory decryption (in-place)
+Decryption is symmetrical:
 
 ```python
-aes.decrypt_directory("myfolder", backup=False)
-```
-### Backup mode (creates new directory)
-
-```python
-aes.decrypt_directory("myfolder_encrypted", backup=True)
-```
-Creates:
-
-    myfolder_encrypted_decrypted/
-
-### Decrypt filenames
-
-```python
-aes.decrypt_directory("myfolder", decrypt_filenames=True, backup=False)
-```
-### Decrypt directory names
-
-```python
-aes.decrypt_directory("myfolder", decrypt_dirnames=True, recursive=True, backup=False)
-```
-### Complete example with all options
-
-```python
+aes.decrypt_directory("myfolder", recursive=True, remove_original=True)
 
 aes.decrypt_directory(
-    directory_path="myfolder_encrypted",
+    "5pJm...",                    # the encrypted directory name shown by ls
+    recursive=True,
     decrypt_filenames=True,
     decrypt_dirnames=True,
-    recursive=True,
-    backup=False
+    remove_original=True,
 )
 ```
+
+Without `recursive=True` only the files directly inside the directory are processed.
+
 ---
 
-## Key Information
+## File format (version 2)
 
-```python
-info = aes.get_key_info()
-print(info)
-
-Example:
-
-{
-    "key": "...",
-    "key_hex": "a4f5...",
-    "salt": "...",
-    "salt_hex": "d2ab...",
-    "key_type": "password-derived"
-}
+```
+"BRCH" | version(1)=2 | kdf(1) | iterations(4) | chunk_log2(1)
+       | salt(16, password mode only) | nonce_prefix(8)
+       | chunk_0 | chunk_1 | ... | chunk_n
 ```
 
----
+- `kdf` is `0` for a raw 32-byte key and `1` for PBKDF2-HMAC-SHA256.
+- Each chunk (1 MiB by default) is AES-256-GCM ciphertext followed by a 16-byte tag.
+- The nonce of a chunk is `nonce_prefix || chunk_index`, and the authenticated data is the whole header plus a flag marking the last chunk. Wrong keys, tampering, reordering and truncation therefore all fail authentication.
+- Names are encrypted with AES-256-GCM too, using a key derived from the main key.
 
-## Internal Encrypted File Format
-
-[4 bytes salt_length] [salt (if present)] [16-byte IV] [encrypted_data]
-
-- Salt only stored for password-derived keys
-- IV always present
-- Ensures reproducible decryption
+Files written by brachinus 1.x (AES-CBC, no authentication) can still be decrypted. They are never produced any more, and **files written by this version cannot be read by brachinus 1.x**.
 
 ---
 
 ## Command Line Interface (CLI)
-
-Brachinus includes a terminal command: `brachinus`
 
 ```
 brachinus encrypt [options] [FILE...]
@@ -236,7 +209,7 @@ The CLI follows Unix conventions:
 | `-o, --output PATH` | Output file or directory (`-` for stdout) |
 | `-r, --recursive` | Process directories recursively (required for directories) |
 | `-f, --force` | Overwrite existing files |
-| `--remove` | Delete each input file after it was processed successfully |
+| `--remove` | Delete each input file after its output was written successfully |
 | `-e, --ext EXT` | `encrypt` only: in directories, only process files with this extension (repeatable) |
 | `--encrypt-names` | `encrypt` only: also encrypt file and directory names |
 | `-v, --verbose` | One line per file on stderr (`brachinus: src -> dest`) |
@@ -268,12 +241,33 @@ Verify password:
 
 ### Directories
 
-Directories require `-r`. The result is a new directory next to the original (`docs` becomes `docs.enc`), which is left untouched.
+Directories require `-r` and are processed **in place**: only files get the `.enc` suffix, directories keep their names.
 
 ```
 $ brachinus encrypt -r -k aes.key docs
-$ brachinus decrypt -r -k aes.key docs.enc     # recreates docs/
+$ tree docs
+docs
+├── a.txt
+├── a.txt.enc
+└── notes
+    ├── b.txt
+    └── b.txt.enc
 ```
+
+Add `--remove` to keep only the encrypted files:
+
+```
+$ brachinus encrypt -r -k aes.key --remove docs
+$ tree docs
+docs
+├── a.txt.enc
+└── notes
+    └── b.txt.enc
+
+$ brachinus decrypt -r -k aes.key --remove docs
+```
+
+If the originals still exist when decrypting, `decrypt` reports `already exists (use -f to overwrite)` for each of them. Use `-f` to overwrite, or `--remove` when encrypting.
 
 Only encrypt some file types:
 
@@ -285,24 +279,29 @@ Files already ending in `.enc` are skipped when encrypting a directory.
 
 ### Encrypted names
 
-`--encrypt-names` encrypts file names and directory names, including the top-level directory:
+`--encrypt-names` encrypts file names and directory names, including the top-level directory. Because the top-level name changes, a new directory is created next to the original, so combine it with `--remove` to replace the tree:
 
 ```
-$ brachinus encrypt -r -k aes.key --encrypt-names docs
+$ brachinus encrypt -r -k aes.key --encrypt-names --remove docs
 $ ls
-docs  UrjepyYQsYOdwh3HPOmvBKq58cUousq6Q677EL0LYUU.enc
+5pJmQx...Wq0
+$ tree 5pJmQx...Wq0
+5pJmQx...Wq0
+├── Zk3v...Hd8.enc
+└── Lr9T...n2A
+    └── Y7bC...u1E.enc
 ```
 
-There is no flag for decryption: `decrypt` detects encrypted names automatically and restores the originals. Use the encrypted name shown by `ls`:
+Directories have no `.enc` suffix; files do. There is no flag for decryption: `decrypt` detects encrypted names automatically and restores the originals. Use the encrypted name shown by `ls`:
 
 ```
-$ brachinus -v decrypt -r -k aes.key UrjepyYQsYOdwh3HPOmvBKq58cUousq6Q677EL0LYUU.enc
-brachinus: UrjepyYQ....enc/Qk3x....enc -> docs/a.txt
+$ brachinus -v decrypt -r -k aes.key --remove 5pJmQx...Wq0
+brachinus: 5pJmQx...Wq0/Zk3v...Hd8.enc -> docs/a.txt
 ```
 
 If a name cannot be decrypted (wrong key, or it was never encrypted), it is kept as it is.
 
-**Name length limit.** Encrypted names are longer than the originals, and most filesystems limit a name to 255 bytes. When an encrypted name would not fit, that file is reported and skipped, and the others continue:
+**Name length limit.** Encrypted names are longer than the originals, and most filesystems limit a name to 255 bytes. In practice file names up to about 139 bytes work with a password and about 159 bytes with a key file. When an encrypted name would not fit, that file is reported and skipped, and the others continue:
 
 ```
 brachinus: docs/very-long-name.txt: encrypted name of 'very-long-name.txt' is 260 bytes (limit 255); use a shorter name or drop --encrypt-names
@@ -319,7 +318,6 @@ $ brachinus decrypt -k aes.key photo.jpg.enc -o -                # to stdout
 - With a single file and `-o FILE`, the output is exactly `FILE`.
 - With several inputs, a directory input, or an `-o` ending in `/`, `-o` is a directory.
 - `-o -` writes to stdout and needs exactly one input file.
-- When decrypting a directory whose name does not end in `.enc`, the default output is `NAME_decrypted`.
 
 ### Deleting the originals
 
@@ -327,7 +325,7 @@ $ brachinus decrypt -k aes.key photo.jpg.enc -o -                # to stdout
 $ brachinus encrypt -r -k aes.key --remove docs
 ```
 
-An original is removed only after its own output was written successfully, and directories emptied this way are removed as well.
+An original is removed only after its own output was written successfully, and only if that output exists and is a different file. On a failure (for example a wrong password) nothing is removed. Directories emptied this way are removed as well.
 
 ### Pipes
 
@@ -353,6 +351,8 @@ $ brachinus encrypt -r --password-file pass.txt docs
 $ echo "secret" | brachinus encrypt -r --password-fd 0 docs
 ```
 
+The key is derived once per run, so a batch of files pays the password-hashing cost only once.
+
 ### Key management
 
 ```
@@ -361,7 +361,7 @@ $ ls -l aes.key
 -rw------- 1 user user 32 ... aes.key
 
 $ brachinus key show aes.key
-type:         binary
+type:         random
 fingerprint:  SHA256:Ivt0MqigR7QG5EqTPaHv51u7ll+flvkHPIos500b7Bc
 
 $ brachinus key show --reveal aes.key      # prints the key itself, in hex
@@ -397,6 +397,12 @@ brachinus: docs: is a directory (use -r)
 $ brachinus decrypt photo.jpg
 brachinus: photo.jpg: unknown suffix (expected .enc); use -o FILE
 
+$ brachinus decrypt --password-file wrong.txt photo.jpg.enc
+brachinus: photo.jpg.enc: authentication failed (wrong password/key, or the file was modified or truncated)
+
+$ brachinus decrypt -k aes.key notes.txt.enc      # a file that is not from brachinus
+brachinus: notes.txt.enc: not a brachinus file
+
 $ brachinus encrypt
 usage: brachinus encrypt [-h] ...
 brachinus encrypt: error: no input files (use '-' for stdin)
@@ -418,18 +424,19 @@ brachinus encrypt: error: no input files (use '-' for stdin)
 | `-lk FILE`, `-ki` | `key show FILE` |
 | `-e .txt` | `-e txt` (the dot is optional) |
 
-Files encrypted with the old CLI use the same file format and can be decrypted by the new one.
+Files encrypted with the old CLI can still be decrypted by the new one. New files use the version 2 format and cannot be opened by old versions.
 
 ---
 
 ## Security Notes
 
-⚠️ Use strong passwords  
-⚠️ Never reuse password + salt manually  
-⚠️ Keep .key files secure  
+⚠️ Use strong passwords; the key is only as strong as the password  
+⚠️ Keep .key files secure (the CLI warns if they are readable by other users)  
 ⚠️ Lost passwords or keys cannot be recovered  
-⚠️ The CLI keeps originals by default; `--remove` and the in-place mode of the Python API (backup=False) permanently replace them  
-⚠️ CBC mode does not authenticate the data: a wrong password is normally detected through a padding error, but it cannot be guaranteed  
+⚠️ A wrong password or a modified file is detected by authentication, but the data cannot be recovered without the right key  
+⚠️ Do not pass your own `salt` to `AES256()` unless you know why; by default a random one is generated  
+⚠️ The CLI keeps originals by default; `--remove` and `remove_original=True` permanently delete them after a successful write  
+⚠️ File sizes, the number of files and the directory layout are not hidden; `--encrypt-names` only hides the names  
 ⚠️ Always test with non-critical data first
 
 ---

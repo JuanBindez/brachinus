@@ -15,7 +15,10 @@ Conventions followed:
   * '-' (or no FILE) means stdin/stdout, so it works in pipelines;
   * a failure on one file does not stop the others;
   * outputs are produced in a private temp dir and renamed into place;
-  * originals are kept unless --remove is given.
+  * originals are kept unless --remove is given (and only removed after the
+    output was written successfully);
+  * files get the ".enc" suffix, directories never do: directory trees are
+    processed in place, and directory names change only with --encrypt-names.
 
 Exit status: 0 success, 1 runtime error, 2 usage error, 130 interrupted.
 """
@@ -231,22 +234,24 @@ def process(encrypting, aes, src, dest, force):
 
         out_path = os.path.join(work, "out" + SUFFIX if encrypting else "out")
 
+        # The library never deletes anything here: removal of the input is
+        # decided by --remove, after this function has succeeded.
         try:
             if encrypting:
                 produced = aes.encrypt_file(
-                    src_path, out_path, encrypt_filename=False, backup=True
+                    src_path, out_path, encrypt_filename=False, remove_original=False
                 )
             else:
                 produced = aes.decrypt_file(
-                    src_path, out_path, decrypt_filename=False, backup=True
+                    src_path, out_path, decrypt_filename=False, remove_original=False
                 )
         except OSError:
             raise
+        except ValueError as e:
+            # DecryptionError / FormatError / InvalidKeyError: the message is already clear
+            raise CliError(str(e))
         except Exception as e:
-            if encrypting:
-                raise CliError(f"encryption failed: {e}")
-
-            raise CliError(f"decryption failed: {e} (wrong password/key or corrupted file?)")
+            raise CliError(f"{'encryption' if encrypting else 'decryption'} failed: {e}")
 
         result = out_path
 
@@ -379,7 +384,9 @@ def plan_encrypt(args, names, log):
             continue
 
         try:
-            top_out = enc_component(names, top, args, SUFFIX)
+            # Directories never get the suffix. Without --encrypt-names this is
+            # the directory itself, so files are encrypted in place.
+            top_out = enc_component(names, top, args)
         except CliError as e:
             log.error(f"{arg}: {e.message}")
             continue
@@ -489,10 +496,10 @@ def plan_decrypt(args, names, log):
             log.error(f"{arg}: cannot process the root directory")
             continue
 
-        if top.endswith(SUFFIX) and top != SUFFIX:
-            top_out = names.decrypt(top[: -len(SUFFIX)])
-        else:
-            top_out = top + "_decrypted"
+        # Directories carry no suffix now; a trailing ".enc" is still accepted
+        # so trees made by older versions can be restored.
+        token = top[: -len(SUFFIX)] if top.endswith(SUFFIX) and top != SUFFIX else top
+        top_out = names.decrypt(token)
 
         if out and len(args.files) == 1:
             outroot = out
@@ -583,6 +590,14 @@ def run_crypto(args, parser, log):
                 log.note(f"{label} -> {'(stdout)' if dest == '-' else dest}")
 
                 if args.remove and src is not None:
+                    # Never delete the input unless the output really exists
+                    # and is a different file.
+                    if not os.path.exists(dest) or os.path.samefile(src, dest):
+                        raise CliError(
+                            "not removing the input: output is missing or is the same file",
+                            src,
+                        )
+
                     os.unlink(src)
                     removed.append(src)
             except (KeyboardInterrupt, Fatal):
@@ -655,18 +670,18 @@ def add_common(p):
     p.add_argument("-o", "--output", metavar="PATH",
                    help="output file or directory ('-' for stdout)")
     p.add_argument("-r", "--recursive", action="store_true",
-                   help="process directories recursively")
+                   help="process directories recursively (in place; only file names get .enc)")
     p.add_argument("-f", "--force", action="store_true",
                    help="overwrite existing files")
     p.add_argument("--remove", action="store_true",
-                   help="delete each input file after it was processed successfully")
+                   help="delete each input file after its output was written successfully")
 
 
 def build_parser():
     parser = argparse.ArgumentParser(
         prog=PROG,
         description=(
-            f"Brachinus v{__version__}, Copyright (C) 2025 - 2026, Juan Bindez. "
+            f"Brachinus v{__version__}, Copyright © 2025–2026, JuanBindez. "
             "AES-256 file encryption."
         ),
     )
